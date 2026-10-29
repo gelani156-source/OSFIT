@@ -7,11 +7,11 @@ import {
 } from 'lucide-react'
 import {
   allPrograms, allWorkouts, saveProgram, deleteProgram, saveWorkout,
-  deleteWorkout, importBackup, exportBackup, allMeasurements, saveMeasurement, deleteMeasurement
+  deleteWorkout, importBackup, exportBackup, allSchedule, saveSchedule, deleteSchedule, getProfile, saveProfile, allMeasurements, saveMeasurement, deleteMeasurement
 } from './db'
 import {
   blankSet, cloneLines, estimate1RM, exerciseCatalog, uid, volumeOf,
-  type Program, type Workout, type ExerciseLine, type SetLine, type Measurement
+  type Program, type Workout, type ExerciseLine, type SetLine, type Schedule, type Profile, type Measurement
 } from './model'
 
 type Tab = 'train' | 'history' | 'progress' | 'calendar' | 'body' | 'muscles'
@@ -60,7 +60,7 @@ export default function App() {
   const [programs, setPrograms] = useState<Program[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [measurements, setMeasurements] = useState<Measurement[]>([])
-  const [bodyForm, setBodyForm] = useState({date:new Date().toISOString().slice(0,10),weight:"",waist:"",chest:"",arm:"",thigh:"",note:""})
+  const [bodyForm, setBodyForm] = useState({date:new Date().toISOString().slice(0,10),weight:'',waist:'',chest:'',arm:'',thigh:'',hips:'',neck:'',note:''})
   const [calendarMonth, setCalendarMonth] = useState(new Date().toISOString().slice(0,7))
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
@@ -78,8 +78,17 @@ export default function App() {
   const [textImport, setTextImport] = useState(false)
   const [planText, setPlanText] = useState('')
   const [planName, setPlanName] = useState('Импорт из IRONLOG')
+  const [profile,setProfile]=useState<Profile>(getProfile)
+  const [schedule,setSchedule]=useState<Schedule[]>([])
+  const [plannedDate,setPlannedDate]=useState(new Date().toISOString().slice(0,10))
+  const [plannedProgram,setPlannedProgram]=useState('')
+  const [repeatDays,setRepeatDays]=useState(0)
+  const [musclePeriod,setMusclePeriod]=useState(7)
+  const [draft,setDraft]=useState(false)
+  const [targetReps,setTargetReps]=useState(8)
+
   const [restDuration,setRestDuration]=useState(()=>Number(localStorage.getItem('osfit-rest')||90))
-  const [restUntil,setRestUntil]=useState(0)
+  const [restUntil,setRestUntil]=useState(()=>Number(localStorage.getItem('osfit-rest-until')||0))
   const [clock,setClock]=useState(Date.now())
   const [editingWorkoutId,setEditingWorkoutId]=useState<string|null>(null)
   const [selectedExercise,setSelectedExercise]=useState('')
@@ -87,12 +96,20 @@ export default function App() {
   const [ironlogPreview,setIronlogPreview]=useState<{programs:Program[],workouts:Workout[],measurements:Measurement[],warnings:string[]}|null>(null)
   useEffect(()=>{if(!restUntil)return;const timer=window.setInterval(()=>setClock(Date.now()),1000);return()=>window.clearInterval(timer)},[restUntil])
   const secondsLeft=Math.max(0,Math.ceil((restUntil-clock)/1000))
-  const startRest=()=>{setClock(Date.now());setRestUntil(Date.now()+restDuration*1000)}
+  useEffect(()=>{if(editor==='session'&&rows.length){localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId}))}},[editor,rows,name,activeProgramId,editingWorkoutId])
+  const restoreDraft=()=>{try{const d=JSON.parse(localStorage.getItem('osfit-session-draft')||'null');if(!d||!Array.isArray(d.rows))return;setName(d.name);setRows(d.rows);setActiveProgramId(d.activeProgramId??null);setEditingWorkoutId(d.editingWorkoutId??null);setEditor('session');setDraft(false)}catch{setError('Черновик повреждён')}}
+  const storeProfile=(patch:Partial<Profile>)=>{setProfile(old=>{const p={...old,...patch};saveProfile(p);return p})}
+  const addPlanned=async()=>{if(!plannedProgram)return setError('Выберите программу');try{await saveSchedule({id:uid(),date:plannedDate,programId:plannedProgram,repeatDays:repeatDays||undefined});setSchedule(await allSchedule());tell('Тренировка запланирована')}catch(e){setError(String(e))}}
+  const removePlanned=async(id:string)=>{await deleteSchedule(id);setSchedule(await allSchedule())}
+  const upcoming=(day:string)=>schedule.filter(a=>{const delta=Math.round((Date.parse(day+'T12:00:00')-Date.parse(a.date+'T12:00:00'))/86400000);return delta>=0&&(delta===0||!!a.repeatDays&&delta%a.repeatDays===0)})
+
+  useEffect(()=>{setDraft(!!localStorage.getItem('osfit-session-draft'))},[])
+  const startRest=()=>{setClock(Date.now());const until=Date.now()+restDuration*1000;setRestUntil(until);localStorage.setItem('osfit-rest-until',String(until))}
   const file = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
-    const [p, w, m] = await Promise.all([allPrograms(), allWorkouts(), allMeasurements()])
-    setMeasurements(m.sort((a,b)=>b.date.localeCompare(a.date)))
+    const [p, w, m, a] = await Promise.all([allPrograms(), allWorkouts(), allMeasurements(), allSchedule()])
+    setSchedule(a);setMeasurements(m.sort((a,b)=>b.date.localeCompare(a.date)))
     setPrograms(p.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
     setWorkouts(w.sort((a, b) => b.date.localeCompare(a.date)))
   }, [])
@@ -151,7 +168,7 @@ export default function App() {
         await saveWorkout({ id: editingWorkoutId ?? uid(), name: name.trim(), date: original?.date ?? new Date().toISOString(), programId: activeProgramId, exercises: rows, volume: volumeOf(rows) })
         tell('Тренировка сохранена')
       }
-      await load(); setEditor(null); setEditingWorkoutId(null); setDirty(false);setRestUntil(0)
+      await load(); if(editor==='session')localStorage.removeItem('osfit-session-draft'); setEditor(null); setEditingWorkoutId(null); setDirty(false);setRestUntil(0)
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
   const removeP = async (id: string) => {
@@ -196,7 +213,7 @@ export default function App() {
   const saveBody = async () => {
     try {
       const value = (v:string) => v.trim() === '' ? undefined : Number(v.replace(',', '.'))
-      const m:Measurement = {id:uid(),date:bodyForm.date,weight:value(bodyForm.weight),waist:value(bodyForm.waist),chest:value(bodyForm.chest),arm:value(bodyForm.arm),thigh:value(bodyForm.thigh),note:bodyForm.note}
+      const m:Measurement = {id:uid(),date:bodyForm.date,weight:value(bodyForm.weight),waist:value(bodyForm.waist),chest:value(bodyForm.chest),arm:value(bodyForm.arm),thigh:value(bodyForm.thigh),hips:value(bodyForm.hips),neck:value(bodyForm.neck),note:bodyForm.note}
       if (!m.date || ![m.weight,m.waist,m.chest,m.arm,m.thigh].some(v=>v!==undefined)) throw new Error('Укажите дату и хотя бы один замер')
       if ([m.weight,m.waist,m.chest,m.arm,m.thigh].some(v=>v!==undefined && (!Number.isFinite(v)||v<=0||v>500))) throw new Error('Проверьте значения замеров')
       await saveMeasurement(m); await load(); tell('Замеры сохранены')
@@ -239,17 +256,25 @@ export default function App() {
         <button className="btn secondary full" disabled={importing} onClick={() => file.current?.click()}><Upload size={18}/> Восстановить из JSON</button>
         <input ref={file} hidden type="file" accept="application/json,.json" onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f) }}/>
         <p className="muted small">Восстановление заменяет текущие данные. Поддерживается архив OSFIT 0.1.0.</p>
+        <h2>Профиль и настройки атлета</h2>
+        <label className="field-label">Модель атлета</label><select className="input" value={profile.sex} onChange={e=>storeProfile({sex:e.target.value as Profile['sex']})}><option value="male">Мужская</option><option value="female">Женская</option></select>
+        <label className="field-label">Рост (см)</label><input className="input" type="number" value={profile.height} onChange={e=>storeProfile({height:Number(e.target.value)})}/>
+        <label className="field-label">Дата рождения</label><input className="input" type="date" value={profile.birthDate} onChange={e=>storeProfile({birthDate:e.target.value})}/>
+        <label className="field-label">Цель</label><select className="input" value={profile.goal} onChange={e=>storeProfile({goal:e.target.value})}><option>Сила и масса</option><option>Сила</option><option>Набор мышечной массы</option><option>Поддержание формы</option></select>
+        <label className="field-label">Шаг прибавки веса (кг)</label><input className="input" type="number" step="0.5" min="0.5" value={profile.weightStep} onChange={e=>storeProfile({weightStep:Math.max(.5,Number(e.target.value)||2.5)})}/>
+        <label className="field-label"><input type="checkbox" checked={profile.autoProgress} onChange={e=>storeProfile({autoProgress:e.target.checked})}/> Включить рекомендации прогрессии</label>
         <label className="field-label">Отдых между подходами (секунды)</label>
         <input className="input" type="number" min="15" max="900" value={restDuration} onChange={e=>{const v=Math.max(15,Math.min(900,Number(e.target.value)||90));setRestDuration(v);localStorage.setItem('osfit-rest',String(v))}}/>
         <label className="field-label">Перенос JSON из Scriptable IRONLOG</label>
         <input className="input" type="file" accept=".json,application/json" onChange={e=>{const f=e.target.files?.[0];if(f)void handleIronlog(f)}}/>
         {ironlogPreview&&<div className="card"><strong>Предпросмотр переноса</strong><p>Тренировок: {ironlogPreview.workouts.length} · Программ: {ironlogPreview.programs.length} · Замеров: {ironlogPreview.measurements.length}</p>{ironlogPreview.warnings.slice(0,12).map((w,i)=><p className="muted small" key={i}>{w}</p>)}<button className="btn primary full" disabled={!ironlogPreview.workouts.length&&!ironlogPreview.programs.length&&!ironlogPreview.measurements.length} onClick={()=>void applyIronlog()}>Добавить распознанные данные</button></div>}
-        <div className="card"><strong>OSFIT 2.0.0</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
+        <div className="card"><strong>OSFIT 3.0.0</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
       </section> : textImport ? <section>
         <button className="back" onClick={() => setTextImport(false)}><ChevronLeft size={18}/> К программам</button>
         <p className="eyebrow">ИМПОРТ IRONLOG</p><h1>Импорт плана</h1>
         <label className="field-label">Название программы</label>
         <input className="input title-input" value={planName} onChange={e => setPlanName(e.target.value)}/>
+        <label className="field-label">Импорт TXT / CSV</label><input className="input" type="file" accept=".txt,.csv,text/plain,text/csv" onChange={e=>{const f=e.target.files?.[0];if(f)void f.text().then(t=>setPlanText(f.name.toLowerCase().endsWith('.csv')?t.replace(/;/g,' ').replace(/,(?=\s*[^\d])/g,' '):t))}}/>
         <label className="field-label">Вставьте упражнения (каждое с новой строки)</label>
         <textarea className="input" style={{ width: '100%', minHeight: 170, boxSizing: 'border-box' }} value={planText} onChange={e => setPlanText(e.target.value)} placeholder={'Среда\nЖим 80 4/6\nПрисед 4/8 92,5\nПресс 4*20'}/>
         <p className="muted small">Поддерживаются форматы: «Жим 80 4/6», «Присед 4/8 92,5», «Пресс 4*20». Неизвестные строки не импортируются.</p>
@@ -267,15 +292,17 @@ export default function App() {
         {editor === 'session' && <div className="session-stats"><span><b>{doneCount}</b> / {setCount} подходов</span><span><b>{fmt(volumeOf(rows))}</b> кг тоннаж</span></div>}
         {rows.map((r, i) => <article className="exercise-card" key={r.id}>
           <div className="exercise-head"><div><span className="exercise-number">{String(i + 1).padStart(2, '0')}</span><strong>{r.name}</strong></div><button className="tiny-icon" title="Удалить упражнение" onClick={() => { setRows(old => old.filter((_, k) => k !== i)); setDirty(true) }}><Trash2 size={17}/></button></div>
+          <div className="exercise-options"><label>Суперсет <input className="input" placeholder="A, B..." value={r.superset||''} onChange={e=>changeRow(i,x=>({...x,superset:e.target.value}))}/></label><label>Заметка <input className="input" placeholder="Техника" value={r.note||''} onChange={e=>changeRow(i,x=>({...x,note:e.target.value}))}/></label></div>
           <div className="set-headers"><span>Подход</span><span>Вес, кг</span><span>Повторы</span><span>{editor === 'session' ? 'Готово' : 'План'}</span></div>
           {r.sets.map((s, j) => <div className="set-row" key={s.id}>
             <span className="set-index">{j + 1}</span>
             <input aria-label={`Вес подхода ${j + 1}`} type="number" min="0" max="9999" step="0.5" inputMode="decimal" value={s.weight} onChange={e => changeSet(i, j, { weight: Math.max(0, Number(e.target.value) || 0) })}/>
             <input aria-label={`Повторы подхода ${j + 1}`} type="number" min="0" max="999" inputMode="numeric" value={s.reps} onChange={e => changeSet(i, j, { reps: Math.max(0, Number(e.target.value) || 0) })}/>
             {editor === 'session' ? <label className="check-wrap"><input aria-label={`Выполнен подход ${j + 1}`} type="checkbox" checked={s.done} onChange={e => changeSet(i, j, { done: e.target.checked })}/><span><Check size={17}/></span></label> : <span className="muted center">—</span>}
+            <div className="set-extras"><select aria-label="Тип подхода" value={s.kind||'work'} onChange={e=>changeSet(i,j,{kind:e.target.value as SetLine['kind']})}><option value="work">Рабочий</option><option value="warmup">Разминка</option><option value="drop">Дроп-сет</option></select><input aria-label="RPE" title="RPE" type="number" placeholder="RPE" min="1" max="10" step="0.5" value={s.rpe??''} onChange={e=>changeSet(i,j,{rpe:e.target.value?Number(e.target.value):undefined})}/><input aria-label="RIR" title="RIR" type="number" placeholder="RIR" min="0" max="10" value={s.rir??''} onChange={e=>changeSet(i,j,{rir:e.target.value?Number(e.target.value):e.target.value==='0'?0:undefined})}/><input aria-label="Темп" placeholder="Темп 3-1-1-0" value={s.tempo||''} onChange={e=>changeSet(i,j,{tempo:e.target.value})}/></div>
             <button title="Удалить подход" className="row-remove" onClick={() => changeRow(i, x => ({ ...x, sets: x.sets.filter((_, k) => k !== j) }))}>×</button>
           </div>)}
-          {editor==='session'&&<p className="muted small">Рекомендация следующего рабочего веса: {recommendedWeight(r.name)===null?'нет данных':`${recommendedWeight(r.name)} кг`} (прибавка 2,5 кг при 8+ повторах во всех выполненных подходах прошлой тренировки)</p>}
+          {editor==='session'&&profile.autoProgress&&<p className="muted small">Рекомендация следующего рабочего веса: {recommendedWeight(r.name)===null?'нет данных':`${recommendedWeight(r.name)} кг`} (прибавка 2,5 кг при 8+ повторах во всех выполненных подходах прошлой тренировки)</p>}
           <button className="add-set" onClick={() => changeRow(i, x => ({ ...x, sets: [...x.sets, blankSet()] }))}><Plus size={16}/> Добавить подход</button>
         </article>)}
         {picker ? <div className="card picker"><div className="picker-title"><b>Добавить упражнение</b><button className="tiny-icon" onClick={() => setPicker(false)}>×</button></div>
@@ -293,6 +320,7 @@ export default function App() {
         <button className="btn danger full" onClick={() => void removeW(detail.id)}><Trash2 size={17}/> Удалить запись</button>
       </section> : tab === 'train' ? <section>
         <div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={() => beginProgram()}><Plus size={17}/> Создать</button></div>
+        {draft&&<button className="btn primary full" onClick={restoreDraft}>Продолжить незавершённую тренировку</button>}
         <button className="btn secondary full" style={{ marginBottom: 16 }} onClick={() => setTextImport(true)}><Upload size={17}/> Импорт IRONLOG</button>
         {!programs.length ? <div className="empty"><Dumbbell size={38}/><h2>Начните с программы</h2><p>Добавьте упражнения и подходы — затем приступайте к тренировке.</p><button className="btn primary" onClick={() => beginProgram()}><Plus size={16}/> Создать программу</button></div> : programs.map(p => <article className="program-card" key={p.id}>
           <div className="program-top"><span className="program-mark"><Dumbbell size={19}/></span><div><strong>{p.name}</strong><p className="muted small">{p.exercises.length} упражнений · {p.exercises.reduce((n, x) => n + x.sets.length, 0)} подходов</p></div></div>
@@ -303,28 +331,31 @@ export default function App() {
         {!workouts.length ? <div className="empty"><CalendarDays size={36}/><h2>Пока нет тренировок</h2><p>Завершённые тренировки будут появляться здесь.</p></div> : workouts.map(w => <button className="history-card" key={w.id} onClick={() => setDetail(w)}><div className="history-date"><b>{new Date(w.date).getDate()}</b><small>{new Date(w.date).toLocaleDateString('ru-RU', { month: 'short' })}</small></div><div className="history-body"><strong>{w.name}</strong><small>{w.exercises.length} упражнений · {fmt(volumeOf(w.exercises))} кг</small></div><span className="history-arrow">›</span></button>)}
       </section> : tab === 'calendar' ? <section>
         <div className="page-heading"><div><p className="eyebrow">РАСПИСАНИЕ</p><h1>Календарь</h1></div></div>
+        <div className="card"><strong>Запланировать тренировку</strong><label className="field-label">Дата начала</label><input className="input" type="date" value={plannedDate} onChange={e=>setPlannedDate(e.target.value)}/><label className="field-label">Программа</label><select className="input" value={plannedProgram} onChange={e=>setPlannedProgram(e.target.value)}><option value="">Выбрать программу</option>{programs.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><label className="field-label">Повторять</label><select className="input" value={repeatDays} onChange={e=>setRepeatDays(Number(e.target.value))}><option value={0}>Однократно</option><option value={2}>Каждые 2 дня</option><option value={3}>Каждые 3 дня</option><option value={7}>Раз в неделю</option><option value={14}>Раз в 14 дней</option></select><button className="btn primary full" onClick={()=>void addPlanned()}>Добавить в календарь</button></div>
         <input className="input" type="month" value={calendarMonth} onChange={e=>setCalendarMonth(e.target.value)}/>
         <div className="calendar-grid">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><strong key={d}>{d}</strong>)}
         {Array.from({length:(new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5))-1,1).getDay()+6)%7},(_,i)=><span key={'empty'+i}/>)}
         {Array.from({length:new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5)),0).getDate()},(_,i)=>{
           const date=`${calendarMonth}-${String(i+1).padStart(2,'0')}`
-          const count=workouts.filter(w=>w.date.slice(0,10)===date).length
-          return <button key={date} className={count?'trained':''} onClick={()=>{if(count){setTab('history');tell(`Тренировок за ${date}: ${count}`)}}}>{i+1}{count>0&&<small>●</small>}</button>
+          const count=workouts.filter(w=>w.date.slice(0,10)===date).length;const scheduled=upcoming(date).length
+          return <button key={date} className={count?'trained':scheduled?'planned':''} onClick={()=>{if(count){setTab('history');tell(`Тренировок за ${date}: ${count}`)}}}>{i+1}{count>0?<small>●</small>:scheduled>0?<small>○</small>:null}</button>
         })}</div>
+        <h2 className="section-title">План занятий</h2>{schedule.map(a=><div className="card" key={a.id}><div className="exercise-head"><strong>{a.date} · {programs.find(p=>p.id===a.programId)?.name||'Удалённая программа'}</strong><button className="tiny-icon" onClick={()=>void removePlanned(a.id)}><Trash2 size={17}/></button></div><p className="muted small">{a.repeatDays?`Повтор каждые ${a.repeatDays} дней`:'Однократно'}</p><button className="btn secondary" onClick={()=>{const p=programs.find(p=>p.id===a.programId);if(p)beginSession(p)}}>Начать</button></div>)}
         <h2 className="section-title">Тренировки месяца</h2>
         {workouts.filter(w=>w.date.startsWith(calendarMonth)).length===0?<p className="muted">Нет записей за месяц</p>:workouts.filter(w=>w.date.startsWith(calendarMonth)).map(w=><button className="history-card" key={w.id} onClick={()=>{setTab('history');setDetail(w)}}>{formatDate(w.date)} · {w.name}</button>)}
       </section> : tab === 'body' ? <section>
         <p className="eyebrow">АНТРОПОМЕТРИЯ</p><h1>Замеры тела</h1>
         <div className="card"><label className="field-label">Дата</label><input className="input" type="date" value={bodyForm.date} onChange={e=>setBodyForm(x=>({...x,date:e.target.value}))}/>
-        <div className="measure-grid">{([['weight','Вес, кг'],['waist','Талия, см'],['chest','Грудь, см'],['arm','Рука, см'],['thigh','Бедро, см']] as const).map(([key,label])=><label key={key}>{label}<input className="input" inputMode="decimal" placeholder="—" value={bodyForm[key]} onChange={e=>setBodyForm(x=>({...x,[key]:e.target.value}))}/></label>)}</div>
+        <div className="measure-grid">{([['weight','Вес, кг'],['waist','Талия, см'],['chest','Грудь, см'],['arm','Рука, см'],['thigh','Бедро, см'],['hips','Таз, см'],['neck','Шея, см']] as const).map(([key,label])=><label key={key}>{label}<input className="input" inputMode="decimal" placeholder="—" value={bodyForm[key]} onChange={e=>setBodyForm(x=>({...x,[key]:e.target.value}))}/></label>)}</div>
         <label className="field-label">Заметка</label><input className="input" value={bodyForm.note} onChange={e=>setBodyForm(x=>({...x,note:e.target.value}))}/>
         <button className="btn primary full" onClick={()=>void saveBody()}><Save size={17}/> Сохранить замеры</button></div>
-        <h2 className="section-title">История</h2>
-        {!measurements.length?<p className="muted">Замеров пока нет</p>:measurements.map(m=><div className="card" key={m.id}><div className="exercise-head"><strong>{m.date}</strong><button className="tiny-icon" onClick={()=>void removeBody(m.id)}><Trash2 size={17}/></button></div><p className="muted small">{([['weight','Вес','кг'],['waist','Талия','см'],['chest','Грудь','см'],['arm','Рука','см'],['thigh','Бедро','см']] as const).filter(([k])=>m[k]!==undefined).map(([k,n,u])=>`${n}: ${m[k]} ${u}`).join(' · ')}</p>{m.note&&<p>{m.note}</p>}</div>)}
+        <h2 className="section-title">История замеров</h2>
+        {!measurements.length?<p className="muted">Замеров пока нет</p>:measurements.map(m=><div className="card" key={m.id}><div className="exercise-head"><strong>{m.date}</strong><button className="tiny-icon" onClick={()=>void removeBody(m.id)}><Trash2 size={17}/></button></div><p className="muted small">{([['weight','Вес','кг'],['waist','Талия','см'],['chest','Грудь','см'],['arm','Рука','см'],['thigh','Бедро','см'],['hips','Таз','см'],['neck','Шея','см']] as const).filter(([k])=>m[k]!==undefined).map(([k,n,u])=>`${n}: ${m[k]} ${u}`).join(' · ')}</p>{m.note&&<p>{m.note}</p>}</div>)}
       </section> : tab === 'muscles' ? <section>
         <p className="eyebrow">АНАТОМИЯ НАГРУЗКИ</p><h1>Атлет и мышцы</h1>
-        <MuscleMap loads={muscleTotals}/>
-        <h2>Мышцы текущей тренировки</h2><MuscleMap loads={activeMuscles}/>
+        <div className="muscle-toolbar">{[7,30,90,365].map(n=><button className={musclePeriod===n?'active':''} key={n} onClick={()=>setMusclePeriod(n)}>{n} дн.</button>)}</div>
+        <MuscleMap sex={profile.sex} loads={muscleLoad(workouts.filter(w=>Date.now()-Date.parse(w.date)<musclePeriod*86400000))}/>
+        <h2>Мышцы текущей тренировки</h2><MuscleMap sex={profile.sex} loads={activeMuscles}/>
       </section> : <section>
         <div className="page-heading"><div><p className="eyebrow">СТАТИСТИКА</p><h1>Прогресс</h1></div></div>
         <div className="metrics"><div><small>Тренировок</small><b>{stats.sessions}</b></div><div><small>Подходов</small><b>{stats.sets}</b></div><div><small>Общий тоннаж</small><b>{fmt(stats.volume)} <em>кг</em></b></div></div>

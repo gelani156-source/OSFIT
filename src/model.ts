@@ -1,9 +1,11 @@
-export type SetLine={id:string,weight:number,reps:number,done:boolean}
-export type ExerciseLine={id:string,name:string,sets:SetLine[]}
+export type SetLine={id:string,weight:number,reps:number,done:boolean,kind?:'work'|'warmup'|'drop',rpe?:number,rir?:number,tempo?:string,note?:string}
+export type ExerciseLine={id:string,name:string,sets:SetLine[],superset?:string,note?:string}
 export type Program={id:string,name:string,exercises:ExerciseLine[],createdAt:string}
 export type Workout={id:string,name:string,programId:string|null,date:string,exercises:ExerciseLine[],volume:number}
-export type Measurement={id:string,date:string,weight?:number,waist?:number,chest?:number,arm?:number,thigh?:number,note?:string}
-export type Backup={format:'osfit-backup',version:number,exportedAt:string,programs:Program[],workouts:Workout[],measurements?:Measurement[]}
+export type Measurement={id:string,date:string,weight?:number,waist?:number,chest?:number,arm?:number,thigh?:number,hips?:number,neck?:number,note?:string}
+export type Schedule={id:string,date:string,programId:string,repeatDays?:number,status?:'planned'|'skipped'}
+export type Profile={sex:'male'|'female',height:number,birthDate:string,goal:string,weightStep:number,autoProgress:boolean}
+export type Backup={format:'osfit-backup',version:number,exportedAt:string,programs:Program[],workouts:Workout[],measurements?:Measurement[],schedule?:Schedule[],profile?:Profile}
 export const uid=()=>crypto.randomUUID()
 export const blankSet=():SetLine=>({id:uid(),weight:0,reps:8,done:false})
 export const cloneLines=(rows:ExerciseLine[]):ExerciseLine[]=>rows.map(x=>({...x,id:uid(),sets:x.sets.map(s=>({...s,id:uid(),done:false}))}))
