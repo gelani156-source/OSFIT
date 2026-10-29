@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import MuscleMap,{muscleLoad,exerciseMuscleLoad} from './MuscleMap'
+import MuscleMap,{exerciseMuscleLoad} from './MuscleMap'
 import {convertIronlog} from './ironlog'
 import {
   Dumbbell, CalendarDays, ChartNoAxesCombined, Plus, Trash2, ChevronLeft,
@@ -85,7 +85,6 @@ export default function App() {
   const [repeatDays,setRepeatDays]=useState(0)
   const [musclePeriod,setMusclePeriod]=useState(7)
   const [draft,setDraft]=useState(false)
-  const [targetReps,setTargetReps]=useState(8)
 
   const [restDuration,setRestDuration]=useState(()=>Number(localStorage.getItem('osfit-rest')||90))
   const [restUntil,setRestUntil]=useState(()=>Number(localStorage.getItem('osfit-rest-until')||0))
@@ -221,7 +220,7 @@ export default function App() {
     } catch(e) { setError(e instanceof Error?e.message:String(e)) }
   }
   const removeBody = async(id:string) => { if(!window.confirm('Удалить замер?')) return; try {await deleteMeasurement(id);await load()}catch(e){setError(String(e))} }
-  const muscleTotals=muscleLoad(workouts)
+
   const activeMuscles=exerciseMuscleLoad(rows)
   const exerciseNames=Array.from(new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name)))).sort()
   const exerciseSeries=workouts.filter(w=>w.exercises.some(e=>e.name===selectedExercise)).slice().reverse().map(w=>({date:w.date.slice(0,10),value:Math.max(...w.exercises.filter(e=>e.name===selectedExercise).flatMap(e=>e.sets.filter(s=>s.done).map(t=>t.weight)),0)}))
