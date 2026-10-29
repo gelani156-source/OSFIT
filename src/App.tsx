@@ -1,3 +1,4 @@
+import { parseIronlogProgram } from './textImport'
 import {useCallback,useEffect,useRef,useState} from 'react'
 import {Dumbbell,CalendarDays,ChartNoAxesCombined,Plus,Trash2,ChevronLeft,Check,Download,Upload,Settings,Save,Play,Copy,PenLine,ArrowLeft,Search} from 'lucide-react'
 import {allPrograms,allWorkouts,saveProgram,deleteProgram,saveWorkout,deleteWorkout,importBackup,exportBackup} from './db'
