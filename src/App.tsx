@@ -28,6 +28,37 @@ export default function App(){
  const removeW=async(id:string)=>{if(!window.confirm('Удалить запись о тренировке?'))return;try{await deleteWorkout(id);setDetail(null);await load()}catch(e){setError(String(e))}}
  const download=async()=>{try{const data=await exportBackup();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`osfit-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);tell('Архив подготовлен')}catch(e){setError(String(e))}}
  const upload=async(f:File)=>{try{const payload=JSON.parse(await f.text());if(!window.confirm('Импорт заменит все существующие программы и историю. Продолжить?'))return;setImporting(true);await importBackup(payload);await load();setSettings(false);tell('Данные восстановлены')}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setImporting(false);if(file.current)file.current.value=''}}
+ const importTextPlan = async () => {
+   const text = window.prompt(
+     'Вставьте тренировочный план из IRONLOG'
+   )
+
+   if (text === null || !text.trim()) return
+
+   try {
+     setError('')
+
+     const name = window.prompt(
+       'Название программы',
+       'Импорт из IRONLOG'
+     )
+
+     if (name === null) return
+
+     const program = parseIronlogProgram(text, name)
+
+     await saveProgram(program)
+     await load()
+
+     tell(
+       `Импортировано упражнений: ${program.exercises.length}`
+     )
+   } catch (e) {
+     setError(
+       e instanceof Error ? e.message : String(e)
+     )
+   }
+ }
  const doneCount=rows.reduce((n,r)=>n+r.sets.filter(s=>s.done).length,0),setCount=rows.reduce((n,r)=>n+r.sets.length,0)
  const stats={sessions:workouts.length,volume:workouts.reduce((n,w)=>n+volumeOf(w.exercises),0),sets:workouts.reduce((n,w)=>n+w.exercises.reduce((v,r)=>v+r.sets.filter(s=>s.done).length,0),0)}
  const best=new Map<string,number>();for(const w of workouts)for(const r of w.exercises)for(const s of r.sets)if(s.done)best.set(r.name,Math.max(best.get(r.name)??0,estimate1RM(s.weight,s.reps)))
@@ -40,7 +71,16 @@ export default function App(){
  {picker?<div className="card picker"><div className="picker-title"><b>Добавить упражнение</b><button className="tiny-icon" onClick={()=>setPicker(false)}>×</button></div><div className="search"><Search size={17}/><input autoFocus placeholder="Поиск или своё название" value={query} onChange={e=>setQuery(e.target.value)}/></div><div className="catalog">{(query.trim()?Array.from(new Set([query.trim(),...exerciseCatalog.filter(x=>x.toLowerCase().includes(query.trim().toLowerCase()))])):exerciseCatalog).slice(0,30).map(x=><button key={x} onClick={()=>addExercise(x)}>{x}<Plus size={15}/></button>)}</div></div>:<button className="btn secondary full" onClick={()=>setPicker(true)}><Plus size={18}/> Добавить упражнение</button>}
  <button className="btn primary full save-btn" onClick={()=>void saveCurrent()}><Save size={18}/> {editor==='program'?'Сохранить программу':'Завершить и сохранить'}</button>{editor==='session'&&<p className="small muted center">В историю попадут только отмеченные подходы при подсчёте результатов.</p>}</section>
  :detail?<section><button className="back" onClick={()=>setDetail(null)}><ChevronLeft size={18}/> История</button><p className="eyebrow">{formatDate(detail.date)}</p><h1>{detail.name}</h1><div className="metrics two"><div><small>Тоннаж</small><b>{weight(volumeOf(detail.exercises))} кг</b></div><div><small>Подходы</small><b>{detail.exercises.reduce((n,r)=>n+r.sets.filter(s=>s.done).length,0)}</b></div></div>{detail.exercises.map(r=><div className="card" key={r.id}><strong>{r.name}</strong>{r.sets.filter(s=>s.done).map((s,i)=><p className="muted small" key={s.id}>{i+1}. {weight(s.weight)} кг × {s.reps} · 1ПМ ≈ {weight(estimate1RM(s.weight,s.reps))} кг</p>)}</div>)}<button className="btn danger full" onClick={()=>void removeW(detail.id)}><Trash2 size={17}/> Удалить запись</button></section>
- :tab==='train'?<section><div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={()=>beginProgram()}><Plus size={17}/> Создать</button></div>{!programs.length?<div className="empty"><Dumbbell size={38}/><h2>Начните с программы</h2><p>Добавьте упражнения и подходы — затем приступайте к тренировке.</p><button className="btn primary" onClick={()=>beginProgram()}><Plus size={16}/> Создать программу</button></div>:programs.map(p=><article className="program-card" key={p.id}><div className="program-top"><span className="program-mark"><Dumbbell size={19}/></span><div><strong>{p.name}</strong><p className="muted small">{p.exercises.length} упражнений · {p.exercises.reduce((n,x)=>n+x.sets.length,0)} подходов</p></div></div><div className="program-actions"><button onClick={()=>beginSession(p)} className="btn primary"><Play size={16} fill="currentColor"/> Начать</button><button title="Редактировать" className="btn secondary icon-only" onClick={()=>beginProgram(p)}><PenLine size={17}/></button><button title="Копировать" className="btn secondary icon-only" onClick={()=>{void saveProgram({...p,id:uid(),name:p.name+' (копия)',createdAt:new Date().toISOString()}).then(load).catch(e=>setError(String(e)))}}><Copy size={17}/></button><button title="Удалить" className="btn secondary icon-only" onClick={()=>void removeP(p.id)}><Trash2 size={17}/></button></div></article>)}</section>
+ :tab==='train'?<section><div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1><h1>Мои программы</h1>
+<button
+  className="btn secondary"
+  style={{ marginTop: 12 }}
+  onClick={() => void importTextPlan()}
+>
+  <Upload size={17} />
+  Импорт IRONLOG
+</button>
+</div></div><button className="btn primary compact" onClick={()=>beginProgram()}><Plus size={17}/> Создать</button></div>{!programs.length?<div className="empty"><Dumbbell size={38}/><h2>Начните с программы</h2><p>Добавьте упражнения и подходы — затем приступайте к тренировке.</p><button className="btn primary" onClick={()=>beginProgram()}><Plus size={16}/> Создать программу</button></div>:programs.map(p=><article className="program-card" key={p.id}><div className="program-top"><span className="program-mark"><Dumbbell size={19}/></span><div><strong>{p.name}</strong><p className="muted small">{p.exercises.length} упражнений · {p.exercises.reduce((n,x)=>n+x.sets.length,0)} подходов</p></div></div><div className="program-actions"><button onClick={()=>beginSession(p)} className="btn primary"><Play size={16} fill="currentColor"/> Начать</button><button title="Редактировать" className="btn secondary icon-only" onClick={()=>beginProgram(p)}><PenLine size={17}/></button><button title="Копировать" className="btn secondary icon-only" onClick={()=>{void saveProgram({...p,id:uid(),name:p.name+' (копия)',createdAt:new Date().toISOString()}).then(load).catch(e=>setError(String(e)))}}><Copy size={17}/></button><button title="Удалить" className="btn secondary icon-only" onClick={()=>void removeP(p.id)}><Trash2 size={17}/></button></div></article>)}</section>
  :tab==='history'?<section><div className="page-heading"><div><p className="eyebrow">ЖУРНАЛ</p><h1>История</h1></div></div>{!workouts.length?<div className="empty"><CalendarDays size={36}/><h2>Пока нет тренировок</h2><p>Завершённые тренировки будут появляться здесь.</p></div>:workouts.map(w=><button className="history-card" key={w.id} onClick={()=>setDetail(w)}><div className="history-date"><b>{new Date(w.date).getDate()}</b><small>{new Date(w.date).toLocaleDateString('ru-RU',{month:'short'})}</small></div><div className="history-body"><strong>{w.name}</strong><small>{w.exercises.length} упражнений · {weight(volumeOf(w.exercises))} кг</small></div><span className="history-arrow">›</span></button>)}</section>
  :<section><div className="page-heading"><div><p className="eyebrow">СТАТИСТИКА</p><h1>Прогресс</h1></div></div><div className="metrics"><div><small>Тренировок</small><b>{stats.sessions}</b></div><div><small>Подходов</small><b>{stats.sets}</b></div><div><small>Общий тоннаж</small><b>{weight(stats.volume)} <em>кг</em></b></div></div><h2 className="section-title">Расчётные рекорды 1ПМ</h2>{best.size===0?<div className="empty compact-empty"><ChartNoAxesCombined size={32}/><p>Результаты появятся после первой тренировки.</p></div>:Array.from(best.entries()).sort((a,b)=>b[1]-a[1]).map(([ex,value])=><div className="record" key={ex}><span>{ex}</span><strong>{weight(value)} кг</strong></div>)}<p className="small muted">1ПМ рассчитывается по формуле Эпли. Это оценка, а не измеренный максимум.</p></section>}
  </main>{!editor&&!settings&&!detail&&<nav className="bottom-nav" aria-label="Основная навигация"><button className={tab==='train'?'active':''} onClick={()=>switchTab('train')}><Dumbbell size={21}/><span>Тренировка</span></button><button className={tab==='history'?'active':''} onClick={()=>switchTab('history')}><CalendarDays size={21}/><span>История</span></button><button className={tab==='progress'?'active':''} onClick={()=>switchTab('progress')}><ChartNoAxesCombined size={21}/><span>Прогресс</span></button></nav>}</div>
