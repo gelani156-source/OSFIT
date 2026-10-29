@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import MuscleMap,{muscleLoad,exerciseMuscleLoad} from './MuscleMap'
+import {convertIronlog} from './ironlog'
 import {
   Dumbbell, CalendarDays, ChartNoAxesCombined, Plus, Trash2, ChevronLeft,
   Check, Download, Upload, Settings, Save, Play, Copy, PenLine, ArrowLeft, Search, Activity
@@ -12,7 +14,7 @@ import {
   type Program, type Workout, type ExerciseLine, type SetLine, type Measurement
 } from './model'
 
-type Tab = 'train' | 'history' | 'progress' | 'calendar' | 'body'
+type Tab = 'train' | 'history' | 'progress' | 'calendar' | 'body' | 'muscles'
 type Editor = 'program' | 'session' | null
 const formatDate = (s: string) => new Date(s).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' })
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 1 })
@@ -76,6 +78,16 @@ export default function App() {
   const [textImport, setTextImport] = useState(false)
   const [planText, setPlanText] = useState('')
   const [planName, setPlanName] = useState('Импорт из IRONLOG')
+  const [restDuration,setRestDuration]=useState(()=>Number(localStorage.getItem('osfit-rest')||90))
+  const [restUntil,setRestUntil]=useState(0)
+  const [clock,setClock]=useState(Date.now())
+  const [editingWorkoutId,setEditingWorkoutId]=useState<string|null>(null)
+  const [selectedExercise,setSelectedExercise]=useState('')
+  const [ironlogFile,setIronlogFile]=useState<File|null>(null)
+  const [ironlogPreview,setIronlogPreview]=useState<{programs:Program[],workouts:Workout[],measurements:Measurement[],warnings:string[]}|null>(null)
+  useEffect(()=>{if(!restUntil)return;const timer=window.setInterval(()=>setClock(Date.now()),1000);return()=>window.clearInterval(timer)},[restUntil])
+  const secondsLeft=Math.max(0,Math.ceil((restUntil-clock)/1000))
+  const startRest=()=>{setClock(Date.now());setRestUntil(Date.now()+restDuration*1000)}
   const file = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -115,7 +127,7 @@ export default function App() {
   const beginSession = (p: Program) => {
     if (!abandon()) return
     setName(p.name); setRows(cloneLines(p.exercises))
-    setActiveProgramId(p.id); setEditor('session'); setDirty(false)
+    setActiveProgramId(p.id); setEditingWorkoutId(null); setEditor('session'); setDirty(false)
   }
   const changeRow = (index: number, fn: (r: ExerciseLine) => ExerciseLine) => {
     setRows(old => old.map((r, i) => i === index ? fn(r) : r)); setDirty(true)
@@ -135,16 +147,18 @@ export default function App() {
         await saveProgram({ id: editingId ?? uid(), createdAt: prev?.createdAt ?? new Date().toISOString(), name: name.trim(), exercises: rows })
         tell('Программа сохранена')
       } else if (editor === 'session') {
-        await saveWorkout({ id: uid(), name: name.trim(), date: new Date().toISOString(), programId: activeProgramId, exercises: rows, volume: volumeOf(rows) })
+        const original=workouts.find(w=>w.id===editingWorkoutId)
+        await saveWorkout({ id: editingWorkoutId ?? uid(), name: name.trim(), date: original?.date ?? new Date().toISOString(), programId: activeProgramId, exercises: rows, volume: volumeOf(rows) })
         tell('Тренировка сохранена')
       }
-      await load(); setEditor(null); setDirty(false)
+      await load(); setEditor(null); setEditingWorkoutId(null); setDirty(false);setRestUntil(0)
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
   const removeP = async (id: string) => {
     if (!window.confirm('Удалить программу? История останется.')) return
     try { await deleteProgram(id); await load() } catch (e) { setError(String(e)) }
   }
+  const editWorkout=(w:Workout)=>{setDetail(null);setTab('history');setName(w.name);setRows(structuredClone(w.exercises));setActiveProgramId(w.programId);setEditingWorkoutId(w.id);setEditor('session');setDirty(false)}
   const removeW = async (id: string) => {
     if (!window.confirm('Удалить запись о тренировке?')) return
     try { await deleteWorkout(id); setDetail(null); await load() } catch (e) { setError(String(e)) }
@@ -190,6 +204,13 @@ export default function App() {
     } catch(e) { setError(e instanceof Error?e.message:String(e)) }
   }
   const removeBody = async(id:string) => { if(!window.confirm('Удалить замер?')) return; try {await deleteMeasurement(id);await load()}catch(e){setError(String(e))} }
+  const muscleTotals=muscleLoad(workouts)
+  const activeMuscles=exerciseMuscleLoad(rows)
+  const exerciseNames=Array.from(new Set(workouts.flatMap(w=>w.exercises.map(e=>e.name)))).sort()
+  const exerciseSeries=workouts.filter(w=>w.exercises.some(e=>e.name===selectedExercise)).slice().reverse().map(w=>({date:w.date.slice(0,10),value:Math.max(...w.exercises.filter(e=>e.name===selectedExercise).flatMap(e=>e.sets.filter(s=>s.done).map(t=>t.weight)),0)}))
+  const recommendedWeight=(exercise:string)=>{for(const w of workouts){const line=w.exercises.find(e=>e.name.toLowerCase()===exercise.toLowerCase());if(!line)continue;const done=line.sets.filter(s=>s.done&&s.weight>0);if(!done.length)continue;const top=Math.max(...done.map(s=>s.weight));return Math.round((top+(done.every(s=>s.reps>=8)?2.5:0))*2)/2}return null}
+  const handleIronlog=async(f:File)=>{setIronlogFile(f);setIronlogPreview(null);try{const raw=JSON.parse(await f.text()) as unknown;const result=convertIronlog(raw);setIronlogPreview(result)}catch(e){setError(e instanceof Error?e.message:String(e))}}
+  const applyIronlog=async()=>{if(!ironlogPreview||!ironlogFile)return;try{if(!window.confirm(`Добавить ${ironlogPreview.workouts.length} тренировок и ${ironlogPreview.programs.length} программ? Существующие записи останутся.`))return;for(const p of ironlogPreview.programs)await saveProgram(p);for(const w of ironlogPreview.workouts)await saveWorkout(w);for(const m of ironlogPreview.measurements)await saveMeasurement(m);await load();setIronlogPreview(null);setIronlogFile(null);tell('Данные IRONLOG добавлены')}catch(e){setError(String(e))}}
   const doneCount = rows.reduce((n, r) => n + r.sets.filter(s => s.done).length, 0)
   const setCount = rows.reduce((n, r) => n + r.sets.length, 0)
   const stats = {
@@ -218,7 +239,12 @@ export default function App() {
         <button className="btn secondary full" disabled={importing} onClick={() => file.current?.click()}><Upload size={18}/> Восстановить из JSON</button>
         <input ref={file} hidden type="file" accept="application/json,.json" onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f) }}/>
         <p className="muted small">Восстановление заменяет текущие данные. Поддерживается архив OSFIT 0.1.0.</p>
-        <div className="card"><strong>OSFIT 1.0.0</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
+        <label className="field-label">Отдых между подходами (секунды)</label>
+        <input className="input" type="number" min="15" max="900" value={restDuration} onChange={e=>{const v=Math.max(15,Math.min(900,Number(e.target.value)||90));setRestDuration(v);localStorage.setItem('osfit-rest',String(v))}}/>
+        <label className="field-label">Перенос JSON из Scriptable IRONLOG</label>
+        <input className="input" type="file" accept=".json,application/json" onChange={e=>{const f=e.target.files?.[0];if(f)void handleIronlog(f)}}/>
+        {ironlogPreview&&<div className="card"><strong>Предпросмотр переноса</strong><p>Тренировок: {ironlogPreview.workouts.length} · Программ: {ironlogPreview.programs.length} · Замеров: {ironlogPreview.measurements.length}</p>{ironlogPreview.warnings.slice(0,12).map((w,i)=><p className="muted small" key={i}>{w}</p>)}<button className="btn primary full" disabled={!ironlogPreview.workouts.length&&!ironlogPreview.programs.length&&!ironlogPreview.measurements.length} onClick={()=>void applyIronlog()}>Добавить распознанные данные</button></div>}
+        <div className="card"><strong>OSFIT 2.0.0</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
       </section> : textImport ? <section>
         <button className="back" onClick={() => setTextImport(false)}><ChevronLeft size={18}/> К программам</button>
         <p className="eyebrow">ИМПОРТ IRONLOG</p><h1>Импорт плана</h1>
@@ -237,6 +263,7 @@ export default function App() {
         <div className="page-heading"><div><p className="eyebrow">{editor === 'program' ? 'КОНСТРУКТОР' : 'АКТИВНАЯ ТРЕНИРОВКА'}</p><h1>{editor === 'program' ? 'Редактор программы' : 'Тренировка'}</h1></div></div>
         <label className="field-label">Название</label>
         <input className="input title-input" value={name} onChange={e => { setName(e.target.value); setDirty(true) }} placeholder="Название"/>
+        {editor === 'session' && <div className="card"><div className="exercise-head"><strong>Таймер отдыха</strong><button className="btn secondary compact" onClick={startRest}>Старт {restDuration} с</button></div><strong>{secondsLeft>0?`${Math.floor(secondsLeft/60)}:${String(secondsLeft%60).padStart(2,'0')}`:'Готов'}</strong><button className="tiny-icon" onClick={()=>setRestUntil(0)}>Сброс</button></div>}
         {editor === 'session' && <div className="session-stats"><span><b>{doneCount}</b> / {setCount} подходов</span><span><b>{fmt(volumeOf(rows))}</b> кг тоннаж</span></div>}
         {rows.map((r, i) => <article className="exercise-card" key={r.id}>
           <div className="exercise-head"><div><span className="exercise-number">{String(i + 1).padStart(2, '0')}</span><strong>{r.name}</strong></div><button className="tiny-icon" title="Удалить упражнение" onClick={() => { setRows(old => old.filter((_, k) => k !== i)); setDirty(true) }}><Trash2 size={17}/></button></div>
@@ -248,6 +275,7 @@ export default function App() {
             {editor === 'session' ? <label className="check-wrap"><input aria-label={`Выполнен подход ${j + 1}`} type="checkbox" checked={s.done} onChange={e => changeSet(i, j, { done: e.target.checked })}/><span><Check size={17}/></span></label> : <span className="muted center">—</span>}
             <button title="Удалить подход" className="row-remove" onClick={() => changeRow(i, x => ({ ...x, sets: x.sets.filter((_, k) => k !== j) }))}>×</button>
           </div>)}
+          {editor==='session'&&<p className="muted small">Рекомендация следующего рабочего веса: {recommendedWeight(r.name)===null?'нет данных':`${recommendedWeight(r.name)} кг`} (прибавка 2,5 кг при 8+ повторах во всех выполненных подходах прошлой тренировки)</p>}
           <button className="add-set" onClick={() => changeRow(i, x => ({ ...x, sets: [...x.sets, blankSet()] }))}><Plus size={16}/> Добавить подход</button>
         </article>)}
         {picker ? <div className="card picker"><div className="picker-title"><b>Добавить упражнение</b><button className="tiny-icon" onClick={() => setPicker(false)}>×</button></div>
@@ -261,6 +289,7 @@ export default function App() {
         <p className="eyebrow">{formatDate(detail.date)}</p><h1>{detail.name}</h1>
         <div className="metrics two"><div><small>Тоннаж</small><b>{fmt(volumeOf(detail.exercises))} кг</b></div><div><small>Подходы</small><b>{detail.exercises.reduce((n, r) => n + r.sets.filter(s => s.done).length, 0)}</b></div></div>
         {detail.exercises.map(r => <div className="card" key={r.id}><strong>{r.name}</strong>{r.sets.filter(s => s.done).map((s, i) => <p className="muted small" key={s.id}>{i + 1}. {fmt(s.weight)} кг × {s.reps} · 1ПМ ≈ {fmt(estimate1RM(s.weight, s.reps))} кг</p>)}</div>)}
+        <button className="btn secondary full" onClick={() => editWorkout(detail)}><PenLine size={17}/> Редактировать тренировку</button>
         <button className="btn danger full" onClick={() => void removeW(detail.id)}><Trash2 size={17}/> Удалить запись</button>
       </section> : tab === 'train' ? <section>
         <div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={() => beginProgram()}><Plus size={17}/> Создать</button></div>
@@ -292,11 +321,18 @@ export default function App() {
         <button className="btn primary full" onClick={()=>void saveBody()}><Save size={17}/> Сохранить замеры</button></div>
         <h2 className="section-title">История</h2>
         {!measurements.length?<p className="muted">Замеров пока нет</p>:measurements.map(m=><div className="card" key={m.id}><div className="exercise-head"><strong>{m.date}</strong><button className="tiny-icon" onClick={()=>void removeBody(m.id)}><Trash2 size={17}/></button></div><p className="muted small">{([['weight','Вес','кг'],['waist','Талия','см'],['chest','Грудь','см'],['arm','Рука','см'],['thigh','Бедро','см']] as const).filter(([k])=>m[k]!==undefined).map(([k,n,u])=>`${n}: ${m[k]} ${u}`).join(' · ')}</p>{m.note&&<p>{m.note}</p>}</div>)}
+      </section> : tab === 'muscles' ? <section>
+        <p className="eyebrow">АНАТОМИЯ НАГРУЗКИ</p><h1>Атлет и мышцы</h1>
+        <MuscleMap loads={muscleTotals}/>
+        <h2>Мышцы текущей тренировки</h2><MuscleMap loads={activeMuscles}/>
       </section> : <section>
         <div className="page-heading"><div><p className="eyebrow">СТАТИСТИКА</p><h1>Прогресс</h1></div></div>
         <div className="metrics"><div><small>Тренировок</small><b>{stats.sessions}</b></div><div><small>Подходов</small><b>{stats.sets}</b></div><div><small>Общий тоннаж</small><b>{fmt(stats.volume)} <em>кг</em></b></div></div>
         <h2 className="section-title">Тоннаж последних 12 тренировок</h2>
         <div className="bars">{workouts.slice(0,12).reverse().map(w=>{const max=Math.max(1,...workouts.slice(0,12).map(x=>volumeOf(x.exercises)));return <div key={w.id} title={`${formatDate(w.date)}: ${fmt(volumeOf(w.exercises))} кг`} style={{height:`${Math.max(4,volumeOf(w.exercises)/max*100)}%`}}/>})}</div>
+        <h2 className="section-title">Прогресс по упражнению</h2>
+        <select className="input" value={selectedExercise} onChange={e=>setSelectedExercise(e.target.value)}><option value="">Выберите упражнение</option>{exerciseNames.map(n=><option key={n}>{n}</option>)}</select>
+        {selectedExercise&&<div className="card"><div className="bars">{exerciseSeries.slice(-16).map((x,i)=>{const max=Math.max(1,...exerciseSeries.map(t=>t.value));return <div key={i} title={`${x.date}: ${x.value} кг`} style={{height:`${Math.max(5,x.value/max*100)}%`}}/>})}</div><p className="muted small">Максимальный выполненный вес, от старых тренировок к новым.</p></div>}
         <h2 className="section-title">Расчётные рекорды 1ПМ</h2>
         {!best.size ? <div className="empty compact-empty"><ChartNoAxesCombined size={32}/><p>Результаты появятся после первой тренировки.</p></div> : Array.from(best.entries()).sort((a, b) => b[1] - a[1]).map(([ex, value]) => <div className="record" key={ex}><span>{ex}</span><strong>{fmt(value)} кг</strong></div>)}
         <p className="small muted">1ПМ рассчитывается по формуле Эпли. Это оценка, не измеренный максимум.</p>
@@ -308,6 +344,7 @@ export default function App() {
       <button className={tab === 'calendar' ? 'active' : ''} onClick={() => switchTab('calendar')}><CalendarDays size={21}/><span>Календарь</span></button>
       <button className={tab === 'progress' ? 'active' : ''} onClick={() => switchTab('progress')}><ChartNoAxesCombined size={21}/><span>Прогресс</span></button>
       <button className={tab === 'body' ? 'active' : ''} onClick={() => switchTab('body')}><Activity size={21}/><span>Замеры</span></button>
+      <button className={tab === 'muscles' ? 'active' : ''} onClick={() => switchTab('muscles')}><Dumbbell size={21}/><span>Мышцы</span></button>
     </nav>}
   </div>
 }
