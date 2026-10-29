@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Dumbbell, CalendarDays, ChartNoAxesCombined, Plus, Trash2, ChevronLeft,
-  Check, Download, Upload, Settings, Save, Play, Copy, PenLine, ArrowLeft, Search
+  Check, Download, Upload, Settings, Save, Play, Copy, PenLine, ArrowLeft, Search, Activity
 } from 'lucide-react'
 import {
   allPrograms, allWorkouts, saveProgram, deleteProgram, saveWorkout,
-  deleteWorkout, importBackup, exportBackup
+  deleteWorkout, importBackup, exportBackup, allMeasurements, saveMeasurement, deleteMeasurement
 } from './db'
 import {
   blankSet, cloneLines, estimate1RM, exerciseCatalog, uid, volumeOf,
-  type Program, type Workout, type ExerciseLine, type SetLine
+  type Program, type Workout, type ExerciseLine, type SetLine, type Measurement
 } from './model'
 
-type Tab = 'train' | 'history' | 'progress'
+type Tab = 'train' | 'history' | 'progress' | 'calendar' | 'body'
 type Editor = 'program' | 'session' | null
 const formatDate = (s: string) => new Date(s).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' })
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 1 })
@@ -57,6 +57,9 @@ export default function App() {
   const [editor, setEditor] = useState<Editor>(null)
   const [programs, setPrograms] = useState<Program[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
+  const [measurements, setMeasurements] = useState<Measurement[]>([])
+  const [bodyForm, setBodyForm] = useState({date:new Date().toISOString().slice(0,10),weight:"",waist:"",chest:"",arm:"",thigh:"",note:""})
+  const [calendarMonth, setCalendarMonth] = useState(new Date().toISOString().slice(0,7))
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -76,7 +79,8 @@ export default function App() {
   const file = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
-    const [p, w] = await Promise.all([allPrograms(), allWorkouts()])
+    const [p, w, m] = await Promise.all([allPrograms(), allWorkouts(), allMeasurements()])
+    setMeasurements(m.sort((a,b)=>b.date.localeCompare(a.date)))
     setPrograms(p.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
     setWorkouts(w.sort((a, b) => b.date.localeCompare(a.date)))
   }, [])
@@ -175,6 +179,17 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
 
+  const saveBody = async () => {
+    try {
+      const value = (v:string) => v.trim() === '' ? undefined : Number(v.replace(',', '.'))
+      const m:Measurement = {id:uid(),date:bodyForm.date,weight:value(bodyForm.weight),waist:value(bodyForm.waist),chest:value(bodyForm.chest),arm:value(bodyForm.arm),thigh:value(bodyForm.thigh),note:bodyForm.note}
+      if (!m.date || ![m.weight,m.waist,m.chest,m.arm,m.thigh].some(v=>v!==undefined)) throw new Error('Укажите дату и хотя бы один замер')
+      if ([m.weight,m.waist,m.chest,m.arm,m.thigh].some(v=>v!==undefined && (!Number.isFinite(v)||v<=0||v>500))) throw new Error('Проверьте значения замеров')
+      await saveMeasurement(m); await load(); tell('Замеры сохранены')
+      setBodyForm(x=>({...x,weight:'',waist:'',chest:'',arm:'',thigh:'',note:''}))
+    } catch(e) { setError(e instanceof Error?e.message:String(e)) }
+  }
+  const removeBody = async(id:string) => { if(!window.confirm('Удалить замер?')) return; try {await deleteMeasurement(id);await load()}catch(e){setError(String(e))} }
   const doneCount = rows.reduce((n, r) => n + r.sets.filter(s => s.done).length, 0)
   const setCount = rows.reduce((n, r) => n + r.sets.length, 0)
   const stats = {
@@ -203,7 +218,7 @@ export default function App() {
         <button className="btn secondary full" disabled={importing} onClick={() => file.current?.click()}><Upload size={18}/> Восстановить из JSON</button>
         <input ref={file} hidden type="file" accept="application/json,.json" onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f) }}/>
         <p className="muted small">Восстановление заменяет текущие данные. Поддерживается архив OSFIT 0.1.0.</p>
-        <div className="card"><strong>OSFIT 0.2.0</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
+        <div className="card"><strong>OSFIT 1.0.0</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
       </section> : textImport ? <section>
         <button className="back" onClick={() => setTextImport(false)}><ChevronLeft size={18}/> К программам</button>
         <p className="eyebrow">ИМПОРТ IRONLOG</p><h1>Импорт плана</h1>
@@ -257,9 +272,31 @@ export default function App() {
       </section> : tab === 'history' ? <section>
         <div className="page-heading"><div><p className="eyebrow">ЖУРНАЛ</p><h1>История</h1></div></div>
         {!workouts.length ? <div className="empty"><CalendarDays size={36}/><h2>Пока нет тренировок</h2><p>Завершённые тренировки будут появляться здесь.</p></div> : workouts.map(w => <button className="history-card" key={w.id} onClick={() => setDetail(w)}><div className="history-date"><b>{new Date(w.date).getDate()}</b><small>{new Date(w.date).toLocaleDateString('ru-RU', { month: 'short' })}</small></div><div className="history-body"><strong>{w.name}</strong><small>{w.exercises.length} упражнений · {fmt(volumeOf(w.exercises))} кг</small></div><span className="history-arrow">›</span></button>)}
+      </section> : tab === 'calendar' ? <section>
+        <div className="page-heading"><div><p className="eyebrow">РАСПИСАНИЕ</p><h1>Календарь</h1></div></div>
+        <input className="input" type="month" value={calendarMonth} onChange={e=>setCalendarMonth(e.target.value)}/>
+        <div className="calendar-grid">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><strong key={d}>{d}</strong>)}
+        {Array.from({length:(new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5))-1,1).getDay()+6)%7},(_,i)=><span key={'empty'+i}/>)}
+        {Array.from({length:new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5)),0).getDate()},(_,i)=>{
+          const date=`${calendarMonth}-${String(i+1).padStart(2,'0')}`
+          const count=workouts.filter(w=>w.date.slice(0,10)===date).length
+          return <button key={date} className={count?'trained':''} onClick={()=>{if(count){setTab('history');tell(`Тренировок за ${date}: ${count}`)}}}>{i+1}{count>0&&<small>●</small>}</button>
+        })}</div>
+        <h2 className="section-title">Тренировки месяца</h2>
+        {workouts.filter(w=>w.date.startsWith(calendarMonth)).length===0?<p className="muted">Нет записей за месяц</p>:workouts.filter(w=>w.date.startsWith(calendarMonth)).map(w=><button className="history-card" key={w.id} onClick={()=>{setTab('history');setDetail(w)}}>{formatDate(w.date)} · {w.name}</button>)}
+      </section> : tab === 'body' ? <section>
+        <p className="eyebrow">АНТРОПОМЕТРИЯ</p><h1>Замеры тела</h1>
+        <div className="card"><label className="field-label">Дата</label><input className="input" type="date" value={bodyForm.date} onChange={e=>setBodyForm(x=>({...x,date:e.target.value}))}/>
+        <div className="measure-grid">{([['weight','Вес, кг'],['waist','Талия, см'],['chest','Грудь, см'],['arm','Рука, см'],['thigh','Бедро, см']] as const).map(([key,label])=><label key={key}>{label}<input className="input" inputMode="decimal" placeholder="—" value={bodyForm[key]} onChange={e=>setBodyForm(x=>({...x,[key]:e.target.value}))}/></label>)}</div>
+        <label className="field-label">Заметка</label><input className="input" value={bodyForm.note} onChange={e=>setBodyForm(x=>({...x,note:e.target.value}))}/>
+        <button className="btn primary full" onClick={()=>void saveBody()}><Save size={17}/> Сохранить замеры</button></div>
+        <h2 className="section-title">История</h2>
+        {!measurements.length?<p className="muted">Замеров пока нет</p>:measurements.map(m=><div className="card" key={m.id}><div className="exercise-head"><strong>{m.date}</strong><button className="tiny-icon" onClick={()=>void removeBody(m.id)}><Trash2 size={17}/></button></div><p className="muted small">{([['weight','Вес','кг'],['waist','Талия','см'],['chest','Грудь','см'],['arm','Рука','см'],['thigh','Бедро','см']] as const).filter(([k])=>m[k]!==undefined).map(([k,n,u])=>`${n}: ${m[k]} ${u}`).join(' · ')}</p>{m.note&&<p>{m.note}</p>}</div>)}
       </section> : <section>
         <div className="page-heading"><div><p className="eyebrow">СТАТИСТИКА</p><h1>Прогресс</h1></div></div>
         <div className="metrics"><div><small>Тренировок</small><b>{stats.sessions}</b></div><div><small>Подходов</small><b>{stats.sets}</b></div><div><small>Общий тоннаж</small><b>{fmt(stats.volume)} <em>кг</em></b></div></div>
+        <h2 className="section-title">Тоннаж последних 12 тренировок</h2>
+        <div className="bars">{workouts.slice(0,12).reverse().map(w=>{const max=Math.max(1,...workouts.slice(0,12).map(x=>volumeOf(x.exercises)));return <div key={w.id} title={`${formatDate(w.date)}: ${fmt(volumeOf(w.exercises))} кг`} style={{height:`${Math.max(4,volumeOf(w.exercises)/max*100)}%`}}/>})}</div>
         <h2 className="section-title">Расчётные рекорды 1ПМ</h2>
         {!best.size ? <div className="empty compact-empty"><ChartNoAxesCombined size={32}/><p>Результаты появятся после первой тренировки.</p></div> : Array.from(best.entries()).sort((a, b) => b[1] - a[1]).map(([ex, value]) => <div className="record" key={ex}><span>{ex}</span><strong>{fmt(value)} кг</strong></div>)}
         <p className="small muted">1ПМ рассчитывается по формуле Эпли. Это оценка, не измеренный максимум.</p>
@@ -268,7 +305,9 @@ export default function App() {
     {!editor && !settings && !detail && !textImport && <nav className="bottom-nav" aria-label="Основная навигация">
       <button className={tab === 'train' ? 'active' : ''} onClick={() => switchTab('train')}><Dumbbell size={21}/><span>Тренировка</span></button>
       <button className={tab === 'history' ? 'active' : ''} onClick={() => switchTab('history')}><CalendarDays size={21}/><span>История</span></button>
+      <button className={tab === 'calendar' ? 'active' : ''} onClick={() => switchTab('calendar')}><CalendarDays size={21}/><span>Календарь</span></button>
       <button className={tab === 'progress' ? 'active' : ''} onClick={() => switchTab('progress')}><ChartNoAxesCombined size={21}/><span>Прогресс</span></button>
+      <button className={tab === 'body' ? 'active' : ''} onClick={() => switchTab('body')}><Activity size={21}/><span>Замеры</span></button>
     </nav>}
   </div>
 }
