@@ -46,3 +46,25 @@ body{transition:background-color .2s,color .2s}
 :root[data-theme="light"] .set-row input,:root[data-theme="light"] .set-extras input,:root[data-theme="light"] .set-extras select{background:#e5e5ea!important;color:#1c1c1e!important;border-color:#d1d1d6!important}
 :root[data-theme="light"] .osfit-exercise-summary,:root[data-theme="light"] .exercise-number,:root[data-theme="light"] .set-index{color:#1c1c1e!important}
 @media(prefers-reduced-motion:reduce){.osfit-progress-track>div{transition:none}}
+
+/* OSFIT mini widget – iOS-inspired exercise checklist */
+.osfit-mini-widget{background:var(--ios-panel,#1c1c1e);color:var(--ios-text,#fff);padding:16px;border-radius:20px;border:1px solid var(--ios-line,#353539);margin:8px 0 20px;box-shadow:0 8px 24px #0000000e}
+.osfit-mini-head{display:flex;align-items:center;justify-content:space-between;gap:14px;background:transparent;border:0;margin:0;padding:0;height:auto}
+.osfit-mini-head strong{display:block;font-size:17px;line-height:1.25;margin-top:4px}
+.osfit-mini-brand{font-size:12px;font-weight:800;letter-spacing:1px;color:var(--ios-accent,#0a84ff)}
+.osfit-mini-brand span{font-size:10px;letter-spacing:0;color:var(--ios-muted,#98989d);font-weight:500}
+.osfit-mini-count{font-size:16px;color:var(--ios-accent,#0a84ff);font-weight:700;white-space:nowrap}
+.osfit-mini-track{background:var(--border,#38383a);border-radius:99px;height:5px;overflow:hidden;margin:14px 0}
+.osfit-mini-track span{display:block;height:100%;background:var(--ios-accent,#0a84ff);transition:width .25s ease;border-radius:99px}
+.osfit-mini-list{display:grid;gap:6px}
+.osfit-mini-exercise{display:flex;align-items:center;text-align:left;justify-content:space-between;width:100%;min-height:48px;border-radius:12px;border:1px solid transparent;background:var(--ios-secondary,#29292b);padding:10px 12px;color:inherit;gap:10px}
+.osfit-mini-exercise.is-done{opacity:.57}
+.osfit-mini-name{display:block;font-weight:550;font-size:14px;line-height:1.2}
+.osfit-mini-exercise.is-done .osfit-mini-name{text-decoration:line-through}
+.osfit-mini-info{flex:1;min-width:0}
+.osfit-mini-info small{display:block;margin-top:4px;font-size:11px;color:var(--ios-muted,#98989d)}
+.osfit-mini-check{display:grid;place-items:center;flex:none;width:27px;height:27px;border:1.8px solid var(--ios-muted,#98989d);border-radius:50%;font-size:16px}
+.osfit-mini-exercise.is-done .osfit-mini-check{background:var(--ios-accent,#0a84ff);color:white;border-color:var(--ios-accent,#0a84ff)}
+.osfit-mini-open{border:0;background:none;color:var(--ios-accent,#0a84ff);font-weight:600;padding:12px 0 2px;width:100%;text-align:center}
+.osfit-mini-footnote{font-size:10px;color:var(--ios-muted,#98989d);margin:10px 0 0}
+.osfit-mini-compact .osfit-mini-list{max-height:290px;overflow-y:auto}

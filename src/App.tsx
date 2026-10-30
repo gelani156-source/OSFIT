@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {ThemeToggle} from './ThemeToggle'
+import WorkoutMiniWidget from './WorkoutMiniWidget'
 import {muscleLoad,exerciseMuscleLoad} from './MuscleMap'
 import type {Muscle} from './MuscleMap'
 import {groups, groupFor, suggestions, serializeProgram, readProgramFile, getExerciseAlternative, weeklyMuscleSets, bodyPartPrompt} from './smart'
@@ -153,6 +154,7 @@ export default function App() {
   const [lastSummary, setLastSummary] = useState<{name:string,exercises:number,sets:number,volume:number,prs:string[]}|null>(null)
   const [name, setName] = useState('')
   const [rows, setRows] = useState<ExerciseLine[]>([])
+  const [miniRevision,setMiniRevision]=useState(0)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [activeProgramId, setActiveProgramId] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -367,6 +369,23 @@ export default function App() {
   const recommendedWeight=(exercise:string)=>{for(const w of workouts){const line=w.exercises.find(e=>e.name.toLowerCase()===exercise.toLowerCase());if(!line)continue;const done=line.sets.filter(s=>s.done&&s.weight>0);if(!done.length)continue;const top=Math.max(...done.map(s=>s.weight));return Math.round((top+(done.every(s=>s.reps>=8)?profile.weightStep:0))/profile.weightStep)*profile.weightStep}return null}
   const handleIronlog=async(f:File)=>{setIronlogFile(f);setIronlogPreview(null);try{const raw=JSON.parse(await f.text()) as unknown;const result=convertIronlog(raw);setIronlogPreview(result)}catch(e){setError(e instanceof Error?e.message:String(e))}}
   const applyIronlog=async()=>{if(!ironlogPreview||!ironlogFile)return;try{if(!window.confirm(`Добавить ${ironlogPreview.workouts.length} тренировок и ${ironlogPreview.programs.length} программ? Существующие записи останутся.`))return;for(const p of ironlogPreview.programs)await saveProgram(p);for(const w of ironlogPreview.workouts)await saveWorkout(w);for(const m of ironlogPreview.measurements)await saveMeasurement(m);await load();setIronlogPreview(null);setIronlogFile(null);tell('Данные IRONLOG добавлены')}catch(e){setError(String(e))}}
+  // The mini widget operates on the active workout or its locally saved draft.
+  // Never reorder the source rows; the widget sorts only its presentation.
+  const miniDraft=(()=>{if(editor==='session')return {name,rows};try{const x=JSON.parse(localStorage.getItem('osfit-session-draft')||'null') as {name?:string,rows?:ExerciseLine[]}|null;return x&&Array.isArray(x.rows)?{name:x.name||'Тренировка',rows:x.rows}:null}catch{return null}})()
+  const toggleMiniExercise=(id:string)=>{
+    const update=(current:ExerciseLine[])=>current.map(e=>{
+      if(e.id!==id||!e.sets.length)return e
+      const finish=!e.sets.every(s=>s.done)
+      return {...e,sets:e.sets.map(s=>({...s,done:finish}))}
+    })
+    if(editor==='session'){
+      setUndoRows(old=>[...old.slice(-9),structuredClone(rows)])
+      setRows(update)
+      setDirty(true)
+    }else{
+      try{const raw=JSON.parse(localStorage.getItem('osfit-session-draft')||'null');if(!raw||!Array.isArray(raw.rows))return;raw.rows=update(raw.rows);localStorage.setItem('osfit-session-draft',JSON.stringify(raw));setDraft(true);setMiniRevision(n=>n+1)}catch{setError('Не удалось сохранить состояние мини-виджета')}
+    }
+  }
   const sortedRows=editor==='session'?[...rows.filter(r=>!r.sets.length||r.sets.some(s=>!s.done)),...rows.filter(r=>r.sets.length>0&&r.sets.every(s=>s.done))]:rows
   const undo=()=>{const prev=undoRows.at(-1);if(!prev)return;setRows(prev);setUndoRows(x=>x.slice(0,-1));setDirty(true)}
   const toggleRow=(id:string)=>setExpandedRows(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id])
@@ -396,6 +415,8 @@ export default function App() {
     {personalRecord && editor === 'session' && <div className="osfit-pr" role="status"><span>🏆 Новый рекорд 1ПМ: <b>{personalRecord.exercise}</b> · {personalRecord.weight} кг × {personalRecord.reps} (≈{fmt(personalRecord.estimated)} кг)</span><button aria-label="Закрыть уведомление" onClick={()=>setPersonalRecord(null)}>×</button></div>}
     {lastSummary && !editor && <div className="osfit-report" role="region" aria-label="Итоги завершённой тренировки"><div className="osfit-report-head"><strong>✓ Тренировка сохранена · {lastSummary.name}</strong><button onClick={()=>setLastSummary(null)} aria-label="Закрыть отчёт">×</button></div><div className="osfit-report-stats"><span>Упражнений <b>{lastSummary.exercises}</b></span><span>Подходов <b>{lastSummary.sets}</b></span><span>Тоннаж <b>{fmt(lastSummary.volume)} кг</b></span><span>Новых 1ПМ <b>{lastSummary.prs.length}</b></span></div>{lastSummary.prs.length>0&&<p>🏆 {lastSummary.prs.join(', ')}</p>}<p className="muted small">Рекорды рассчитаны по формуле Эпли, а не по фактическому максимуму.</p></div>}
     <style>{OSFIT_CSS + `.osfit-pr,.osfit-report{position:relative;margin:12px 16px;padding:14px;border:1px solid #3f7761;border-radius:14px;background:#172820;color:#e5f6ed;z-index:5}.osfit-pr{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-pr button,.osfit-report-head button{border:0;background:transparent;color:inherit;font-size:24px;cursor:pointer}.osfit-report-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-report-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.osfit-report-stats span{display:flex;flex-direction:column;font-size:12px;color:#acc5b8}.osfit-report-stats b{font-size:17px;color:#ecfff3}.osfit-report p{margin:10px 0 0}`}</style><main className="content">
+      {miniDraft&&miniDraft.rows.length>0&&!settings&&!detail&&!textImport&&(editor==='session'||(!editor&&tab==='train'))&&<WorkoutMiniWidget key={miniRevision} name={miniDraft.name} exercises={miniDraft.rows} onToggle={toggleMiniExercise} onOpen={editor==='session'?undefined:restoreDraft} compact={editor==='session'}/>}
+
       {!editor&&!settings&&!detail&&!textImport&&['history','body','muscles'].includes(tab)&&<div className="osfit-view-buttons"><button className={tab==='history'?'active':''} onClick={()=>switchTab('history')}>История</button><button className={tab==='body'?'active':''} onClick={()=>switchTab('body')}>Замеры</button><button className={tab==='muscles'?'active':''} onClick={()=>switchTab('muscles')}>Мышцы</button></div>}
       {busy ? <p>Загрузка данных…</p> : settings ? <section className={compact?'osfit-compact':''}>
         <button className="back" onClick={() => setSettings(false)}><ArrowLeft size={17}/> Назад</button>
