@@ -148,6 +148,8 @@ export default function App() {
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [personalRecord, setPersonalRecord] = useState<{exercise:string,weight:number,reps:number,estimated:number}|null>(null)
+  const [lastSummary, setLastSummary] = useState<{name:string,exercises:number,sets:number,volume:number,prs:string[]}|null>(null)
   const [name, setName] = useState('')
   const [rows, setRows] = useState<ExerciseLine[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -251,8 +253,23 @@ export default function App() {
     setUndoRows(old=>[...old.slice(-9),structuredClone(rows)])
     setRows(old => old.map((r, i) => i === index ? fn(r) : r)); setDirty(true)
   }
-  const changeSet = (i: number, j: number, patch: Partial<SetLine>) =>
+  const changeSet = (i: number, j: number, patch: Partial<SetLine>) => {
+    const line = rows[i]
+    const before = line?.sets[j]
+    if (editor === 'session' && line && before && patch.done === true && !before.done) {
+      const updated = {...before, ...patch}
+      const newValue = updated.weight > 0 && updated.reps > 0 ? estimate1RM(updated.weight, updated.reps) : 0
+      const previousValues = [
+        ...workouts.flatMap(w => w.exercises.filter(e => e.name.toLowerCase() === line.name.toLowerCase()).flatMap(e => e.sets)),
+        ...rows.flatMap((r,ri) => r.name.toLowerCase() === line.name.toLowerCase() ? r.sets.filter((_,si) => ri !== i || si !== j) : [])
+      ].filter(s => s.done && s.weight > 0 && s.reps > 0).map(s => estimate1RM(s.weight,s.reps))
+      const previousBest = Math.max(0,...previousValues)
+      if (newValue > previousBest + 0.001) {
+        setPersonalRecord({exercise:line.name,weight:updated.weight,reps:updated.reps,estimated:newValue})
+      }
+    }
     changeRow(i, r => ({ ...r, sets: r.sets.map((s, k) => k === j ? { ...s, ...patch } : s) }))
+  }
   const addExercise = (exercise: string) => {
     setUndoRows(old=>[...old.slice(-9),structuredClone(rows)]);setRows(old => [...old, newLine(exercise)]); setDirty(true); setPicker(false); setQuery('')
   }
@@ -267,7 +284,21 @@ export default function App() {
         tell('Программа сохранена')
       } else if (editor === 'session') {
         const original=workouts.find(w=>w.id===editingWorkoutId)
+        const oldRecords = new Map<string,number>()
+        for (const w of workouts.filter(w => w.id !== editingWorkoutId)) for (const e of w.exercises) for (const set of e.sets) {
+          if (!set.done || set.weight <= 0 || set.reps <= 0) continue
+          const key=e.name.toLowerCase()
+          oldRecords.set(key,Math.max(oldRecords.get(key)??0,estimate1RM(set.weight,set.reps)))
+        }
+        const records: string[] = []
+        for (const e of rows) {
+          const scored = e.sets.filter(s=>s.done && s.weight>0 && s.reps>0).map(s=>estimate1RM(s.weight,s.reps))
+          const score=Math.max(0,...scored)
+          if(score>0 && score>(oldRecords.get(e.name.toLowerCase())??0)+0.001)records.push(e.name)
+        }
         await saveWorkout({ id: editingWorkoutId ?? uid(), name: name.trim(), date: original?.date ?? new Date().toISOString(), programId: activeProgramId, exercises: rows, volume: volumeOf(rows) })
+        setLastSummary({name:name.trim(),exercises:rows.length,sets:rows.reduce((n,r)=>n+r.sets.filter(s=>s.done).length,0),volume:volumeOf(rows),prs:records})
+        setPersonalRecord(null)
         tell('Тренировка сохранена')
       }
       await load(); if(editor==='session')localStorage.removeItem('osfit-session-draft'); setEditor(null); setEditingWorkoutId(null); setDirty(false);setRestUntil(0)
@@ -359,7 +390,9 @@ export default function App() {
     </header>
     {error && <div className="error" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
     {notice && <div className="toast">{notice}</div>}
-    <style>{OSFIT_CSS}</style><main className="content">
+    {personalRecord && editor === 'session' && <div className="osfit-pr" role="status"><span>🏆 Новый рекорд 1ПМ: <b>{personalRecord.exercise}</b> · {personalRecord.weight} кг × {personalRecord.reps} (≈{fmt(personalRecord.estimated)} кг)</span><button aria-label="Закрыть уведомление" onClick={()=>setPersonalRecord(null)}>×</button></div>}
+    {lastSummary && !editor && <div className="osfit-report" role="region" aria-label="Итоги завершённой тренировки"><div className="osfit-report-head"><strong>✓ Тренировка сохранена · {lastSummary.name}</strong><button onClick={()=>setLastSummary(null)} aria-label="Закрыть отчёт">×</button></div><div className="osfit-report-stats"><span>Упражнений <b>{lastSummary.exercises}</b></span><span>Подходов <b>{lastSummary.sets}</b></span><span>Тоннаж <b>{fmt(lastSummary.volume)} кг</b></span><span>Новых 1ПМ <b>{lastSummary.prs.length}</b></span></div>{lastSummary.prs.length>0&&<p>🏆 {lastSummary.prs.join(', ')}</p>}<p className="muted small">Рекорды рассчитаны по формуле Эпли, а не по фактическому максимуму.</p></div>}
+    <style>{OSFIT_CSS + `.osfit-pr,.osfit-report{position:relative;margin:12px 16px;padding:14px;border:1px solid #3f7761;border-radius:14px;background:#172820;color:#e5f6ed;z-index:5}.osfit-pr{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-pr button,.osfit-report-head button{border:0;background:transparent;color:inherit;font-size:24px;cursor:pointer}.osfit-report-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-report-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.osfit-report-stats span{display:flex;flex-direction:column;font-size:12px;color:#acc5b8}.osfit-report-stats b{font-size:17px;color:#ecfff3}.osfit-report p{margin:10px 0 0}`}</style><main className="content">
       {!editor&&!settings&&!detail&&!textImport&&['history','body','muscles'].includes(tab)&&<div className="osfit-view-buttons"><button className={tab==='history'?'active':''} onClick={()=>switchTab('history')}>История</button><button className={tab==='body'?'active':''} onClick={()=>switchTab('body')}>Замеры</button><button className={tab==='muscles'?'active':''} onClick={()=>switchTab('muscles')}>Мышцы</button></div>}
       {busy ? <p>Загрузка данных…</p> : settings ? <section className={compact?'osfit-compact':''}>
         <button className="back" onClick={() => setSettings(false)}><ArrowLeft size={17}/> Назад</button>
@@ -383,7 +416,7 @@ export default function App() {
         <label className="field-label">Перенос JSON из Scriptable IRONLOG</label>
         <input className="input" type="file" accept=".json,application/json" onChange={e=>{const f=e.target.files?.[0];if(f)void handleIronlog(f)}}/>
         {ironlogPreview&&<div className="card"><strong>Предпросмотр переноса</strong><p>Тренировок: {ironlogPreview.workouts.length} · Программ: {ironlogPreview.programs.length} · Замеров: {ironlogPreview.measurements.length}</p>{ironlogPreview.warnings.slice(0,12).map((w,i)=><p className="muted small" key={i}>{w}</p>)}<button className="btn primary full" disabled={!ironlogPreview.workouts.length&&!ironlogPreview.programs.length&&!ironlogPreview.measurements.length} onClick={()=>void applyIronlog()}>Добавить распознанные данные</button></div>}
-        <div className="card"><strong>OSFIT 3.0.0</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
+        <div className="card"><strong>OSFIT 4.1 — Smart Workout</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
       </section> : textImport ? <section>
         <button className="back" onClick={() => setTextImport(false)}><ChevronLeft size={18}/> К программам</button>
         <p className="eyebrow">ИМПОРТ IRONLOG</p><h1>Импорт плана</h1>
