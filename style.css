@@ -1,15 +1,32 @@
-import {exerciseCatalog,type Program,type Workout,type ExerciseLine} from './model'
-export const groups=['Все','Грудь','Спина','Ноги','Плечи','Руки','Пресс']
-export const groupFor=(name:string)=>/жим(?!\s*ног|\s*стоя|\s*над\s*голов|\s*армей)|bench|chest|груд|сведени|бабочк|pec deck|кроссовер|брусь/i.test(name)?'Грудь':/тяга|подтяг|лодоч|гипер|lat|row|спин/i.test(name)?'Спина':/присед|нога|ноги|станов|выпад|икр|жим ног|разгибание ног|сгибание ног/i.test(name)?'Ноги':/дельт|плеч|развед|махи в стороны|жим стоя|жим над головой|армей|face pull|обратные разведения/i.test(name)?'Плечи':/сгибан|бицепс|трицепс|косичк|разгибан.*рук|молот|hammer/i.test(name)?'Руки':'Пресс'
-export const suggestions=(group:string)=>exerciseCatalog.filter(e=>group==='Все'||groupFor(e)===group)
-export const bodyPartPrompt=(name:string)=>groups.find(g=>g.toLowerCase()===name.toLowerCase())||''
-export const getExerciseAlternative=(name:string)=>[...new Set([name,...suggestions(groupFor(name))])].slice(0,12)
-export const serializeProgram=(p:Program)=>JSON.stringify({format:'osfit-program',version:1,program:p},null,2)
-export const readProgramFile=async(file:File):Promise<Program>=>{const d=JSON.parse(await file.text());const p=d.program||d;if(typeof p?.name!=='string'||!Array.isArray(p?.exercises))throw new Error('Некорректная программа');return p as Program}
-function completedSets(rows:ExerciseLine[]){
- return rows.reduce((n,e)=>{
-   const hasDone=e.sets.some(s=>s.done)
-   return n+e.sets.filter(s=>hasDone?s.done:(s.reps>0 || s.weight>0)).length
- },0)
+import type {Workout,ExerciseLine} from './model'
+export type Muscle='chest'|'frontDelts'|'sideDelts'|'rearDelts'|'biceps'|'triceps'|'abs'|'back'|'traps'|'glutes'|'quads'|'hamstrings'|'calves'
+const mapping:Record<Muscle,RegExp>={
+ chest:/жим(?!\s*ног|\s*стоя|\s*над\s*голов|\s*армей)|bench|chest|груд|сведени|бабочк|pec deck|кроссовер|брусь/i,
+ frontDelts:/передн.*дельт|front raise|подъем перед собой|жим стоя|жим над головой|армей|military press|arnold/i,
+ sideDelts:/средн.*дельт|махи?\s+в\s+сторон|разведени[ея].*сторон|lateral raise/i,
+ rearDelts:/задн.*дельт|обратн.*разведени|reverse fly|face pull|тяга к лицу/i,
+ biceps:/бицепс|сгибани|молот|hammer/i,
+ triceps:/трицепс|косичк|разгибан.*рук|француз/i,
+ abs:/пресс|скручив|планк|подъем ног/i,
+ back:/тяга|подтяг|лодоч|гипер|lat pull|pulldown|row|спин/i,
+ traps:/шраг|трапец|upright row|тяга к подбородку/i,
+ glutes:/ягод|глют|hip thrust|румын|станов|выпад|присед/i,
+ quads:/квад|присед|жим ног|выпад|разгибание ног|hack squat/i,
+ hamstrings:/задн.*бед|бицепс бедра|станов|румын|сгибание ног/i,
+ calves:/икр|носки|подъем.*на носки/i
 }
-export const weeklyMuscleSets=(workouts:Workout[],group:string,period=7)=>workouts.filter(w=>{const d=Date.parse(w.date);return Number.isFinite(d)&&d>=Date.now()-period*86400000&&d<=Date.now()+86400000}).reduce((sum,w)=>sum+w.exercises.filter(e=>groupFor(e.name)===group).reduce((n,e)=>n+completedSets([e]),0),0)
+export const muscleGroupNames:Record<Muscle,string>={chest:'Грудь',frontDelts:'Передняя дельта',sideDelts:'Средняя дельта',rearDelts:'Задняя дельта',biceps:'Бицепс',triceps:'Трицепс',abs:'Пресс',back:'Спина',traps:'Трапеции',glutes:'Ягодицы',quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'}
+function countExerciseSets(e:ExerciseLine){
+  const hasDone=e.sets.some(s=>s.done)
+  return e.sets.filter(s=>hasDone?s.done:(s.reps>0 || s.weight>0)).length
+}
+export const exerciseMuscleLoad=(rows:ExerciseLine[]):Record<Muscle,number>=>Object.fromEntries(Object.entries(mapping).map(([key,reg])=>[key,rows.filter(e=>reg.test(e.name)).reduce((n,e)=>n+countExerciseSets(e),0)])) as Record<Muscle,number>
+export const muscleLoad=(ws:Workout[]):Record<Muscle,number>=>{
+ const r={} as Record<Muscle,number>;for(const key of Object.keys(mapping) as Muscle[])r[key]=0;
+ for(const w of ws){
+  const hasCompleted=w.exercises.some(e=>e.sets.some(s=>s.done))
+  const historicalRows=hasCompleted?w.exercises:w.exercises.map(e=>({...e,sets:e.sets.map(s=>({...s,done:s.reps>0 || s.weight>0}))}))
+  for(const [k,v] of Object.entries(exerciseMuscleLoad(historicalRows)))r[k as Muscle]+=v
+ }
+ return r
+}

@@ -1,6 +1,1 @@
-import React from 'react'
-import {createRoot} from 'react-dom/client'
-import App from './App'
-import './style.css'
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(console.warn)})}
+const CACHE='osfit-4-8-widget';self.addEventListener('install',e=>{self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil((async()=>{for(const k of await caches.keys())if(k!==CACHE)await caches.delete(k);await self.clients.claim()})())});self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});
