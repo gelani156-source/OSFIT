@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {muscleLoad,exerciseMuscleLoad} from './MuscleMap'
 import type {Muscle} from './MuscleMap'
+import {groups, groupFor, suggestions, serializeProgram, readProgramFile, getExerciseAlternative, weeklyMuscleSets, bodyPartPrompt} from './smart'
+
 import {convertIronlog} from './ironlog'
 import {
   Dumbbell, CalendarDays, ChartNoAxesCombined, Plus, Trash2, ChevronLeft,
@@ -18,6 +20,8 @@ import {
 
 // OSFIT unified update — templates, portable sessions, responsive SVG and compact UI.
 const OSFIT_CSS = `
+.osfit-exercise-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:transparent;color:inherit;border:0;padding:4px 0}.osfit-exercise-summary strong{font-size:15px}.osfit-completed{opacity:.66}.osfit-extras-toggle{background:#1b2930;border:1px solid #374b54;color:#9ce7b8;padding:7px 12px;border-radius:9px;font-size:12px;margin:7px 0}.osfit-group-filters{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.osfit-group-filters button{border:1px solid #3e525b;background:#19242a;color:#c3d5d7;border-radius:15px;padding:8px 12px;font-size:12px}.osfit-group-filters .active{background:#8fe1af;color:#13261c}.osfit-compact .set-row{margin-bottom:4px}.osfit-compact .set-extras{display:none}.osfit-compact .set-row .row-remove{display:none}.osfit-compact .exercise-options{display:none}.osfit-compact .set-row:focus-within .set-extras{display:grid}.osfit-inline-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.osfit-inline-actions button{font-size:12px;padding:7px 10px;border-radius:8px;background:#25333a;color:#cae2d8;border:1px solid #425861}.osfit-goal{font-size:13px;color:#a7c1b7}.osfit-pick-list{max-height:320px;overflow:auto}.osfit-section{padding:12px;border:1px solid #33444b;border-radius:12px;margin:10px 0}
+
 *,*::before,*::after{box-sizing:border-box}
 .app,.content,.card,section,.measure-grid,.measure-grid>label{min-width:0;max-width:100%}
 .content input.input,.content select.input,.content textarea.input,.content input[type="date"],.content input[type="month"]{display:block;box-sizing:border-box;width:100%;max-width:100%;min-width:0}
@@ -151,6 +155,17 @@ export default function App() {
   const [dirty, setDirty] = useState(false)
   const [picker, setPicker] = useState(false)
   const [query, setQuery] = useState('')
+  const [groupFilter,setGroupFilter]=useState('Все')
+  const [compact,setCompact]=useState(()=>localStorage.getItem('osfit-compact')!=='false')
+  const [expandedRows,setExpandedRows]=useState<string[]>([])
+  const [extrasRows,setExtrasRows]=useState<string[]>([])
+  const [undoRows,setUndoRows]=useState<ExerciseLine[][]>([])
+  const [goalInput,setGoalInput]=useState('')
+  const [goalWeight,setGoalWeight]=useState(()=>Number(localStorage.getItem('osfit-goal-weight')||0))
+  const [goalName,setGoalName]=useState(()=>localStorage.getItem('osfit-goal-name')||'Жим штанги лёжа')
+  const [comparison,setComparison]=useState<[string,string]>(['',''])
+  const [backupAt,setBackupAt]=useState(()=>localStorage.getItem('osfit-last-backup')||'')
+
   const [settings, setSettings] = useState(false)
   const [detail, setDetail] = useState<Workout | null>(null)
   const [importing, setImporting] = useState(false)
@@ -229,16 +244,17 @@ export default function App() {
   }
   const beginSession = (p: Program) => {
     if (!abandon()) return
-    setName(p.name); setRows(cloneLines(p.exercises))
+    setName(p.name); setRows(cloneLines(p.exercises));setExpandedRows([]);setUndoRows([])
     setActiveProgramId(p.id); setEditingWorkoutId(null); setEditor('session'); setDirty(false)
   }
   const changeRow = (index: number, fn: (r: ExerciseLine) => ExerciseLine) => {
+    setUndoRows(old=>[...old.slice(-9),structuredClone(rows)])
     setRows(old => old.map((r, i) => i === index ? fn(r) : r)); setDirty(true)
   }
   const changeSet = (i: number, j: number, patch: Partial<SetLine>) =>
     changeRow(i, r => ({ ...r, sets: r.sets.map((s, k) => k === j ? { ...s, ...patch } : s) }))
   const addExercise = (exercise: string) => {
-    setRows(old => [...old, newLine(exercise)]); setDirty(true); setPicker(false); setQuery('')
+    setUndoRows(old=>[...old.slice(-9),structuredClone(rows)]);setRows(old => [...old, newLine(exercise)]); setDirty(true); setPicker(false); setQuery('')
   }
   const saveCurrent = async () => {
     try {
@@ -267,6 +283,7 @@ export default function App() {
     try { await deleteWorkout(id); setDetail(null); await load() } catch (e) { setError(String(e)) }
   }
   const download = async () => {
+    setBackupAt(new Date().toISOString());localStorage.setItem('osfit-last-backup',new Date().toISOString())
     try {
       const data = await exportBackup()
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
@@ -285,10 +302,13 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setImporting(false); if (file.current) file.current.value = '' }
   }
-  const parsed = parseTrainingText(planText)
+  const expandedPlan=planText.split(/\r?\n/).map(line=>{const cleaned=line.replace(/^\s*[-*]\s*(?:\[\s*\]\s*)?/, '').trim();const group=bodyPartPrompt(cleaned);if(!group)return line;const opts=suggestions(group);return opts.length?`${opts[0]} 3/10`:line}).join('\n')
+  const unresolvedGroups=planText.split(/\r?\n/).map(x=>bodyPartPrompt(x.replace(/^\s*[-*]\s*(?:\[\s*\]\s*)?/,''))).filter(Boolean)
+  const parsed = parseTrainingText(expandedPlan)
   const importPlan = async () => {
     try {
       if (!planName.trim()) throw new Error('Укажите название программы')
+      if (unresolvedGroups.length && !window.confirm('Найдены мышечные группы без упражнения: '+unresolvedGroups.join(', ')+'. Предварительно выбран первый вариант из каталога. Проверьте и измените упражнения после импорта. Продолжить?'))return
       if (!parsed.exercises.length) throw new Error('Нет распознанных упражнений')
       if (parsed.warnings.length && !window.confirm(`Пропущено строк: ${parsed.warnings.length}. Сохранить распознанные упражнения?`)) return
       await saveProgram({ id: uid(), name: planName.trim(), exercises: parsed.exercises, createdAt: new Date().toISOString() })
@@ -313,6 +333,13 @@ export default function App() {
   const recommendedWeight=(exercise:string)=>{for(const w of workouts){const line=w.exercises.find(e=>e.name.toLowerCase()===exercise.toLowerCase());if(!line)continue;const done=line.sets.filter(s=>s.done&&s.weight>0);if(!done.length)continue;const top=Math.max(...done.map(s=>s.weight));return Math.round((top+(done.every(s=>s.reps>=8)?profile.weightStep:0))/profile.weightStep)*profile.weightStep}return null}
   const handleIronlog=async(f:File)=>{setIronlogFile(f);setIronlogPreview(null);try{const raw=JSON.parse(await f.text()) as unknown;const result=convertIronlog(raw);setIronlogPreview(result)}catch(e){setError(e instanceof Error?e.message:String(e))}}
   const applyIronlog=async()=>{if(!ironlogPreview||!ironlogFile)return;try{if(!window.confirm(`Добавить ${ironlogPreview.workouts.length} тренировок и ${ironlogPreview.programs.length} программ? Существующие записи останутся.`))return;for(const p of ironlogPreview.programs)await saveProgram(p);for(const w of ironlogPreview.workouts)await saveWorkout(w);for(const m of ironlogPreview.measurements)await saveMeasurement(m);await load();setIronlogPreview(null);setIronlogFile(null);tell('Данные IRONLOG добавлены')}catch(e){setError(String(e))}}
+  const sortedRows=editor==='session'?[...rows.filter(r=>!r.sets.length||r.sets.some(s=>!s.done)),...rows.filter(r=>r.sets.length>0&&r.sets.every(s=>s.done))]:rows
+  const undo=()=>{const prev=undoRows.at(-1);if(!prev)return;setRows(prev);setUndoRows(x=>x.slice(0,-1));setDirty(true)}
+  const toggleRow=(id:string)=>setExpandedRows(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id])
+  const changeExercise=(index:number)=>{const old=rows[index];const options=getExerciseAlternative(old.name);const text=window.prompt('Выбери замену:\n'+options.map((x,i)=>`${i+1}. ${x}`).join('\n')+'\nВведите номер', '1');if(!text)return;const n=Number(text);if(!Number.isInteger(n)||n<1||n>options.length)return;changeRow(index,r=>({...r,name:options[n-1]}))}
+  const previous=(exercise:string)=>{for(const w of workouts)for(const e of w.exercises)if(e.name.toLowerCase()===exercise.toLowerCase()){const a=e.sets.find(s=>s.done);if(a)return `${a.weight} кг × ${a.reps}`}return 'Нет выполненных подходов'}
+  const exportProgram=(p:Program)=>{const blob=new Blob([serializeProgram(p)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='osfit-program.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+  const importSharedProgram=async(file:File)=>{try{const p=await readProgramFile(file);await saveProgram({...p,id:uid(),createdAt:new Date().toISOString()});await load();tell('Программа импортирована')}catch(e){setError(String(e))}}
   const doneCount = rows.reduce((n, r) => n + r.sets.filter(s => s.done).length, 0)
   const setCount = rows.reduce((n, r) => n + r.sets.length, 0)
   const stats = {
@@ -334,7 +361,7 @@ export default function App() {
     {notice && <div className="toast">{notice}</div>}
     <style>{OSFIT_CSS}</style><main className="content">
       {!editor&&!settings&&!detail&&!textImport&&['history','body','muscles'].includes(tab)&&<div className="osfit-view-buttons"><button className={tab==='history'?'active':''} onClick={()=>switchTab('history')}>История</button><button className={tab==='body'?'active':''} onClick={()=>switchTab('body')}>Замеры</button><button className={tab==='muscles'?'active':''} onClick={()=>switchTab('muscles')}>Мышцы</button></div>}
-      {busy ? <p>Загрузка данных…</p> : settings ? <section>
+      {busy ? <p>Загрузка данных…</p> : settings ? <section className={compact?'osfit-compact':''}>
         <button className="back" onClick={() => setSettings(false)}><ArrowLeft size={17}/> Назад</button>
         <h1>Настройки и данные</h1>
         <p className="muted">Данные хранятся только в этом браузере. Создавайте резервные копии.</p>
@@ -378,9 +405,12 @@ export default function App() {
         <input className="input title-input" value={name} onChange={e => { setName(e.target.value); setDirty(true) }} placeholder="Название"/>
         {editor === 'session' && <><button className="btn secondary full" onClick={savePortable}><Download size={17}/> Экспортировать текущую тренировку</button>{portableInfo&&<p className="osfit-helper">{portableInfo}</p>}</>}
         {editor === 'session' && <div className="card"><div className="exercise-head"><strong>Таймер отдыха</strong><button className="btn secondary compact" onClick={startRest}>Старт {restDuration} с</button></div><strong>{secondsLeft>0?`${Math.floor(secondsLeft/60)}:${String(secondsLeft%60).padStart(2,'0')}`:'Готов'}</strong><button className="tiny-icon" onClick={()=>setRestUntil(0)}>Сброс</button></div>}
+        {editor === 'session' && <div className="osfit-inline-actions"><button onClick={undo} disabled={!undoRows.length}>↶ Отменить действие</button><button onClick={()=>{setCompact(v=>{localStorage.setItem('osfit-compact',String(!v));return !v})}}>{compact?'Расширенный вид':'Компактный вид'}</button></div>}
         {editor === 'session' && <div className="session-stats"><span><b>{doneCount}</b> / {setCount} подходов</span><span><b>{fmt(volumeOf(rows))}</b> кг тоннаж</span></div>}
-        {rows.map((r, i) => <article className="exercise-card" key={r.id}>
+        {sortedRows.map((r) => {const i=rows.findIndex(v=>v.id===r.id);const finished=editor==='session'&&r.sets.length>0&&r.sets.every(v=>v.done);const collapsed=finished||expandedRows.includes(r.id);return <article className={'exercise-card'+(finished?' osfit-completed':'')} key={r.id}>
           <div className="exercise-head"><div><span className="exercise-number">{String(i + 1).padStart(2, '0')}</span><strong>{r.name}</strong></div><button className="tiny-icon" title="Удалить упражнение" onClick={() => { setRows(old => old.filter((_, k) => k !== i)); setDirty(true) }}><Trash2 size={17}/></button></div>
+          <button className="osfit-exercise-summary" onClick={()=>toggleRow(r.id)}><span>{finished?'✓ Завершено · ':''}{r.sets.filter(x=>x.done).length}/{r.sets.length} подходов · {previous(r.name)}</span><span>{collapsed?'Развернуть':'Свернуть'}</span></button>
+          {!collapsed&&<><div className="osfit-inline-actions"><button onClick={()=>changeExercise(i)}>Заменить упражнение</button><button onClick={()=>setExtrasRows(v=>v.includes(r.id)?v.filter(x=>x!==r.id):[...v,r.id])}>RPE / RIR / темп</button></div>
           <div className="exercise-options"><label>Суперсет <input className="input" placeholder="A, B..." value={r.superset||''} onChange={e=>changeRow(i,x=>({...x,superset:e.target.value}))}/></label><label>Заметка <input className="input" placeholder="Техника" value={r.note||''} onChange={e=>changeRow(i,x=>({...x,note:e.target.value}))}/></label></div>
           <div className="set-headers"><span>Подход</span><span>Вес, кг</span><span>Повторы</span><span>{editor === 'session' ? 'Готово' : 'План'}</span></div>
           {r.sets.map((s, j) => <div className="set-row" key={s.id}>
@@ -388,15 +418,16 @@ export default function App() {
             <input aria-label={`Вес подхода ${j + 1}`} type="number" min="0" max="9999" step="0.5" inputMode="decimal" value={s.weight} onChange={e => changeSet(i, j, { weight: Math.max(0, Number(e.target.value) || 0) })}/>
             <input aria-label={`Повторы подхода ${j + 1}`} type="number" min="0" max="999" inputMode="numeric" value={s.reps} onChange={e => changeSet(i, j, { reps: Math.max(0, Number(e.target.value) || 0) })}/>
             {editor === 'session' ? <label className="check-wrap"><input aria-label={`Выполнен подход ${j + 1}`} type="checkbox" checked={s.done} onChange={e => changeSet(i, j, { done: e.target.checked })}/><span><Check size={17}/></span></label> : <span className="muted center">—</span>}
-            <div className="set-extras"><select aria-label="Тип подхода" value={s.kind||'work'} onChange={e=>changeSet(i,j,{kind:e.target.value as SetLine['kind']})}><option value="work">Рабочий</option><option value="warmup">Разминка</option><option value="drop">Дроп-сет</option></select><input aria-label="RPE" title="RPE" type="number" placeholder="RPE" min="1" max="10" step="0.5" value={s.rpe??''} onChange={e=>changeSet(i,j,{rpe:e.target.value?Number(e.target.value):undefined})}/><input aria-label="RIR" title="RIR" type="number" placeholder="RIR" min="0" max="10" value={s.rir??''} onChange={e=>changeSet(i,j,{rir:e.target.value?Number(e.target.value):e.target.value==='0'?0:undefined})}/><input aria-label="Темп" placeholder="Темп 3-1-1-0" value={s.tempo||''} onChange={e=>changeSet(i,j,{tempo:e.target.value})}/></div>
+            <div className="set-extras" style={{display:compact&&!extrasRows.includes(r.id)?'none':undefined}}><select aria-label="Тип подхода" value={s.kind||'work'} onChange={e=>changeSet(i,j,{kind:e.target.value as SetLine['kind']})}><option value="work">Рабочий</option><option value="warmup">Разминка</option><option value="drop">Дроп-сет</option></select><input aria-label="RPE" title="RPE" type="number" placeholder="RPE" min="1" max="10" step="0.5" value={s.rpe??''} onChange={e=>changeSet(i,j,{rpe:e.target.value?Number(e.target.value):undefined})}/><input aria-label="RIR" title="RIR" type="number" placeholder="RIR" min="0" max="10" value={s.rir??''} onChange={e=>changeSet(i,j,{rir:e.target.value?Number(e.target.value):e.target.value==='0'?0:undefined})}/><input aria-label="Темп" placeholder="Темп 3-1-1-0" value={s.tempo||''} onChange={e=>changeSet(i,j,{tempo:e.target.value})}/></div>
             <button title="Удалить подход" className="row-remove" onClick={() => changeRow(i, x => ({ ...x, sets: x.sets.filter((_, k) => k !== j) }))}>×</button>
           </div>)}
           {editor==='session'&&profile.autoProgress&&<p className="muted small">Рекомендация следующего рабочего веса: {recommendedWeight(r.name)===null?'нет данных':`${recommendedWeight(r.name)} кг`} (прибавка {profile.weightStep} кг при 8+ повторах во всех выполненных подходах прошлой тренировки)</p>}
-          <button className="add-set" onClick={() => changeRow(i, x => ({ ...x, sets: [...x.sets, blankSet()] }))}><Plus size={16}/> Добавить подход</button>
-        </article>)}
+          <button className="add-set" onClick={() => changeRow(i, x => ({ ...x, sets: [...x.sets, {...(x.sets.at(-1)||blankSet()),id:uid(),done:false}] }))}><Plus size={16}/> Добавить подход</button>
+          </>}
+        </article>})}
         {picker ? <div className="card picker"><div className="picker-title"><b>Добавить упражнение</b><button className="tiny-icon" onClick={() => setPicker(false)}>×</button></div>
           <div className="search"><Search size={17}/><input autoFocus placeholder="Поиск или своё название" value={query} onChange={e => setQuery(e.target.value)}/></div>
-          <div className="catalog">{(query.trim() ? Array.from(new Set([query.trim(), ...exerciseCatalog.filter(x => x.toLowerCase().includes(query.trim().toLowerCase()))])) : exerciseCatalog).slice(0, 30).map(x => <button key={x} onClick={() => addExercise(x)}>{x}<Plus size={15}/></button>)}</div>
+          <div className="osfit-group-filters">{groups.map(g=><button key={g} className={groupFilter===g?'active':''} onClick={()=>setGroupFilter(g)}>{g}</button>)}</div><div className="catalog osfit-pick-list">{(query.trim() ? Array.from(new Set([query.trim(), ...exerciseCatalog.filter(x => x.toLowerCase().includes(query.trim().toLowerCase()))])) : [...new Set([...exerciseCatalog,...suggestions(groupFilter)])]).filter(x=>groupFilter==='Все'||groupFor(x)===groupFilter||x===query.trim()).slice(0, 80).map(x => <button key={x} onClick={() => addExercise(x)}>{x}<Plus size={15}/></button>)}</div>
         </div> : <button className="btn secondary full" onClick={() => setPicker(true)}><Plus size={18}/> Добавить упражнение</button>}
         <button className="btn primary full save-btn" onClick={() => void saveCurrent()}><Save size={18}/>{editor === 'program' ? 'Сохранить программу' : 'Завершить и сохранить'}</button>
         {editor === 'session' && <p className="small muted center">В подсчёт результатов попадут только отмеченные подходы.</p>}
@@ -411,16 +442,21 @@ export default function App() {
         <div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={() => beginProgram()}><Plus size={17}/> Создать</button></div>
         {draft&&<button className="btn primary full" onClick={restoreDraft}>Продолжить незавершённую тренировку</button>}
         <button className="btn secondary full" onClick={() => setShowTemplates(v=>!v)}><Dumbbell size={17}/> Готовые системы тренировок</button>
+        <div className="osfit-section"><strong>Цель по упражнению</strong><div className="osfit-input-row"><input className="input" value={goalName} onChange={e=>setGoalName(e.target.value)} placeholder="Упражнение"/><input className="input" type="number" style={{maxWidth:90}} placeholder="кг" value={goalInput} onChange={e=>setGoalInput(e.target.value)}/><button className="btn secondary compact" onClick={()=>{const v=Number(goalInput);if(v>0){setGoalWeight(v);localStorage.setItem('osfit-goal-weight',String(v));localStorage.setItem('osfit-goal-name',goalName)}}}>Цель</button></div>{goalWeight>0&&<div className="osfit-goal">{goalName}: цель {goalWeight} кг, лучший расчётный 1ПМ {Math.round(best.get(goalName)||0)} кг</div>}</div>
+        {backupAt&&<p className="osfit-helper">Последняя резервная копия: {new Date(backupAt).toLocaleDateString('ru-RU')}</p>}
+        {workouts.length>0&&<details className="osfit-section"><summary>Рабочий объём по группам за 7 дней</summary>{groups.filter(g=>g!=='Все').map(g=><p key={g} className="osfit-goal">{g}: {weeklyMuscleSets(workouts,g)} подходов</p>)}</details>}
         {showTemplates&&<div className="osfit-template-list">{PLAN_TEMPLATES.map((t,i)=><button key={t.title} onClick={()=>void createTemplate(i)}><strong>{t.title}</strong><small>{t.desc} · создаст {t.days.length} программы</small></button>)}</div>}
         <button className="btn secondary full" onClick={()=>portableRef.current?.click()}><Upload size={17}/> Продолжить тренировку из файла</button>
         <input ref={portableRef} hidden type="file" accept=".txt,.json,.csv,.xlsx" onChange={e=>{const f=e.target.files?.[0];if(f)void importPortable(f);e.target.value=''}}/>
+        <label className="btn secondary full" style={{ marginBottom: 10 }}>Импорт общей программы <input hidden type="file" accept=".json" onChange={e=>{const f=e.target.files?.[0];if(f)void importSharedProgram(f);e.target.value=''}}/></label>
         <button className="btn secondary full" style={{ marginBottom: 16 }} onClick={() => setTextImport(true)}><Upload size={17}/> Импорт IRONLOG</button>
         {!programs.length ? <div className="empty"><Dumbbell size={38}/><h2>Начните с программы</h2><p>Добавьте упражнения и подходы — затем приступайте к тренировке.</p><button className="btn primary" onClick={() => beginProgram()}><Plus size={16}/> Создать программу</button></div> : programs.map(p => <article className="program-card" key={p.id}>
           <div className="program-top"><span className="program-mark"><Dumbbell size={19}/></span><div><strong>{p.name}</strong><p className="muted small">{p.exercises.length} упражнений · {p.exercises.reduce((n, x) => n + x.sets.length, 0)} подходов</p></div></div>
-          <div className="program-actions"><button onClick={() => beginSession(p)} className="btn primary"><Play size={16} fill="currentColor"/> Начать</button><button title="Редактировать" className="btn secondary icon-only" onClick={() => beginProgram(p)}><PenLine size={17}/></button><button title="Копировать" className="btn secondary icon-only" onClick={() => { void saveProgram({ ...p, id: uid(), name: p.name + ' (копия)', createdAt: new Date().toISOString() }).then(load).catch(e => setError(String(e))) }}><Copy size={17}/></button><button title="Удалить" className="btn secondary icon-only" onClick={() => void removeP(p.id)}><Trash2 size={17}/></button></div>
+          <div className="program-actions"><button onClick={() => beginSession(p)} className="btn primary"><Play size={16} fill="currentColor"/> Начать</button><button title="Редактировать" className="btn secondary icon-only" onClick={() => beginProgram(p)}><PenLine size={17}/></button><button title="Поделиться программой" className="btn secondary icon-only" onClick={()=>exportProgram(p)}><Download size={17}/></button><button title="Копировать" className="btn secondary icon-only" onClick={() => { void saveProgram({ ...p, id: uid(), name: p.name + ' (копия)', createdAt: new Date().toISOString() }).then(load).catch(e => setError(String(e))) }}><Copy size={17}/></button><button title="Удалить" className="btn secondary icon-only" onClick={() => void removeP(p.id)}><Trash2 size={17}/></button></div>
         </article>)}
       </section> : tab === 'history' ? <section>
         <div className="page-heading"><div><p className="eyebrow">ЖУРНАЛ</p><h1>История</h1></div></div>
+        {workouts.length>1&&<div className="osfit-section"><strong>Сравнить тренировки</strong><div className="osfit-input-row"><select className="input" value={comparison[0]} onChange={e=>setComparison(v=>[e.target.value,v[1]])}><option value="">Первая дата</option>{workouts.map(w=><option value={w.id} key={w.id}>{formatDate(w.date)} · {w.name}</option>)}</select><select className="input" value={comparison[1]} onChange={e=>setComparison(v=>[v[0],e.target.value])}><option value="">Вторая дата</option>{workouts.map(w=><option value={w.id} key={w.id}>{formatDate(w.date)} · {w.name}</option>)}</select></div>{comparison.every(Boolean)&&<p className="osfit-goal">Разница тоннажа: {fmt(volumeOf(workouts.find(w=>w.id===comparison[1])?.exercises||[])-volumeOf(workouts.find(w=>w.id===comparison[0])?.exercises||[]))} кг</p>}</div>}
         {!workouts.length ? <div className="empty"><CalendarDays size={36}/><h2>Пока нет тренировок</h2><p>Завершённые тренировки будут появляться здесь.</p></div> : workouts.map(w => <button className="history-card" key={w.id} onClick={() => setDetail(w)}><div className="history-date"><b>{new Date(w.date).getDate()}</b><small>{new Date(w.date).toLocaleDateString('ru-RU', { month: 'short' })}</small></div><div className="history-body"><strong>{w.name}</strong><small>{w.exercises.length} упражнений · {fmt(volumeOf(w.exercises))} кг</small></div><span className="history-arrow">›</span></button>)}
       </section> : tab === 'calendar' ? <section>
         <div className="page-heading"><div><p className="eyebrow">РАСПИСАНИЕ</p><h1>Календарь</h1></div></div>
