@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {ThemeToggle} from './ThemeToggle'
 import {muscleLoad,exerciseMuscleLoad} from './MuscleMap'
 import type {Muscle} from './MuscleMap'
 import {groups, groupFor, suggestions, serializeProgram, readProgramFile, getExerciseAlternative, weeklyMuscleSets, bodyPartPrompt} from './smart'
@@ -20,7 +21,7 @@ import {
 
 // OSFIT unified update — templates, portable sessions, responsive SVG and compact UI.
 const OSFIT_CSS = `
-.osfit-exercise-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:transparent;color:inherit;border:0;padding:4px 0}.osfit-exercise-summary strong{font-size:15px}.osfit-completed{opacity:.66}.osfit-extras-toggle{background:#1b2930;border:1px solid #374b54;color:#9ce7b8;padding:7px 12px;border-radius:9px;font-size:12px;margin:7px 0}.osfit-group-filters{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.osfit-group-filters button{border:1px solid #3e525b;background:#19242a;color:#c3d5d7;border-radius:15px;padding:8px 12px;font-size:12px}.osfit-group-filters .active{background:#8fe1af;color:#13261c}.osfit-compact .set-row{margin-bottom:4px}.osfit-compact .set-extras{display:none}.osfit-compact .set-row .row-remove{display:none}.osfit-compact .exercise-options{display:none}.osfit-compact .set-row:focus-within .set-extras{display:grid}.osfit-inline-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.osfit-inline-actions button{font-size:12px;padding:7px 10px;border-radius:8px;background:#25333a;color:#cae2d8;border:1px solid #425861}.osfit-goal{font-size:13px;color:#a7c1b7}.osfit-pick-list{max-height:320px;overflow:auto}.osfit-section{padding:12px;border:1px solid #33444b;border-radius:12px;margin:10px 0}
+.osfit-exercise-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:transparent;color:inherit;border:0;padding:4px 0}.osfit-exercise-summary strong{font-size:15px}.osfit-completed{opacity:.66}.osfit-extras-toggle{background:#1b2930;border:1px solid #374b54;color:#0a84ff;padding:7px 12px;border-radius:9px;font-size:12px;margin:7px 0}.osfit-group-filters{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.osfit-group-filters button{border:1px solid #3e525b;background:#19242a;color:#c3d5d7;border-radius:15px;padding:8px 12px;font-size:12px}.osfit-group-filters .active{background:#0a84ff;color:#13261c}.osfit-compact .set-row{margin-bottom:4px}.osfit-compact .set-extras{display:none}.osfit-compact .set-row .row-remove{display:none}.osfit-compact .exercise-options{display:none}.osfit-compact .set-row:focus-within .set-extras{display:grid}.osfit-inline-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.osfit-inline-actions button{font-size:12px;padding:7px 10px;border-radius:8px;background:#25333a;color:#e4e4e9;border:1px solid #425861}.osfit-goal{font-size:13px;color:#98989d}.osfit-pick-list{max-height:320px;overflow:auto}.osfit-section{padding:12px;border:1px solid #33444b;border-radius:12px;margin:10px 0}
 
 *,*::before,*::after{box-sizing:border-box}
 .app,.content,.card,section,.measure-grid,.measure-grid>label{min-width:0;max-width:100%}
@@ -36,7 +37,7 @@ const OSFIT_CSS = `
 .osfit-input-row{display:flex;align-items:center;gap:8px}.osfit-input-row input{flex:1;min-width:0}
 .osfit-view-buttons{display:flex;gap:8px;justify-content:center;margin:12px 0}
 .osfit-view-buttons button{border:1px solid #47565b;border-radius:9px;background:#1d282d;color:#dde8e8;padding:9px 16px}
-.osfit-view-buttons button.active{border-color:#95e2b2;color:#95e2b2}
+.osfit-view-buttons button.active{border-color:#0a84ff;color:#0a84ff}
 @media(max-width:390px){.content{padding-inline:14px}.card{padding-inline:14px}.measure-grid{gap:8px}.bottom-nav button span{font-size:10px}}
 `;
 const PLAN_TEMPLATES: {title:string,desc:string,days:{name:string,items:[string,number,number][]}[]}[]=[
@@ -158,7 +159,9 @@ export default function App() {
   const [picker, setPicker] = useState(false)
   const [query, setQuery] = useState('')
   const [groupFilter,setGroupFilter]=useState('Все')
-  const [compact,setCompact]=useState(()=>localStorage.getItem('osfit-compact')!=='false')
+  const [viewMode,setViewMode]=useState<'simple'|'compact'|'expanded'>(()=>{const v=localStorage.getItem('osfit-view-mode');return v==='simple'||v==='expanded'||v==='compact'?v:localStorage.getItem('osfit-compact')==='false'?'expanded':'compact'})
+  const compact=viewMode!=='expanded'
+  const changeViewMode=(v:'simple'|'compact'|'expanded')=>{setViewMode(v);localStorage.setItem('osfit-view-mode',v)}
   const [expandedRows,setExpandedRows]=useState<string[]>([])
   const [extrasRows,setExtrasRows]=useState<string[]>([])
   const [undoRows,setUndoRows]=useState<ExerciseLine[][]>([])
@@ -397,6 +400,8 @@ export default function App() {
       {busy ? <p>Загрузка данных…</p> : settings ? <section className={compact?'osfit-compact':''}>
         <button className="back" onClick={() => setSettings(false)}><ArrowLeft size={17}/> Назад</button>
         <h1>Настройки и данные</h1>
+        <div className="osfit-settings-row"><ThemeToggle/></div>
+        <label className="field-label">Вид тренировки</label><div className="osfit-segmented" role="group" aria-label="Вид тренировки">{(['simple','compact','expanded'] as const).map(v=><button key={v} className={viewMode===v?'active':''} aria-pressed={viewMode===v} onClick={()=>changeViewMode(v)}>{v==='simple'?'Простой':v==='compact'?'Компактный':'Полный'}</button>)}</div>
         <p className="muted">Данные хранятся только в этом браузере. Создавайте резервные копии.</p>
         <button className="btn primary full" onClick={() => void download()}><Download size={18}/> Скачать архив JSON</button>
         <button className="btn secondary full" disabled={importing} onClick={() => file.current?.click()}><Upload size={18}/> Восстановить из JSON</button>
@@ -438,11 +443,12 @@ export default function App() {
         <input className="input title-input" value={name} onChange={e => { setName(e.target.value); setDirty(true) }} placeholder="Название"/>
         {editor === 'session' && <><button className="btn secondary full" onClick={savePortable}><Download size={17}/> Экспортировать текущую тренировку</button>{portableInfo&&<p className="osfit-helper">{portableInfo}</p>}</>}
         {editor === 'session' && <div className="card"><div className="exercise-head"><strong>Таймер отдыха</strong><button className="btn secondary compact" onClick={startRest}>Старт {restDuration} с</button></div><strong>{secondsLeft>0?`${Math.floor(secondsLeft/60)}:${String(secondsLeft%60).padStart(2,'0')}`:'Готов'}</strong><button className="tiny-icon" onClick={()=>setRestUntil(0)}>Сброс</button></div>}
-        {editor === 'session' && <div className="osfit-inline-actions"><button onClick={undo} disabled={!undoRows.length}>↶ Отменить действие</button><button onClick={()=>{setCompact(v=>{localStorage.setItem('osfit-compact',String(!v));return !v})}}>{compact?'Расширенный вид':'Компактный вид'}</button></div>}
+        {editor === 'session' && <div className="osfit-inline-actions"><button onClick={undo} disabled={!undoRows.length}>↶ Отменить действие</button><div className="osfit-segmented" role="group" aria-label="Вид тренировки">{(['simple','compact','expanded'] as const).map(v=><button key={v} className={viewMode===v?'active':''} aria-pressed={viewMode===v} onClick={()=>changeViewMode(v)}>{v==='simple'?'Простой':v==='compact'?'Компактный':'Полный'}</button>)}</div></div>}
         {editor === 'session' && <div className="session-stats"><span><b>{doneCount}</b> / {setCount} подходов</span><span><b>{fmt(volumeOf(rows))}</b> кг тоннаж</span></div>}
-        {sortedRows.map((r) => {const i=rows.findIndex(v=>v.id===r.id);const finished=editor==='session'&&r.sets.length>0&&r.sets.every(v=>v.done);const collapsed=finished||expandedRows.includes(r.id);return <article className={'exercise-card'+(finished?' osfit-completed':'')} key={r.id}>
+        {sortedRows.map((r) => {const i=rows.findIndex(v=>v.id===r.id);const finished=editor==='session'&&r.sets.length>0&&r.sets.every(v=>v.done);const collapsed=finished|| (viewMode==='simple'? !expandedRows.includes(r.id):expandedRows.includes(r.id));return <article className={'exercise-card'+(finished?' osfit-completed':'')} key={r.id}>
           <div className="exercise-head"><div><span className="exercise-number">{String(i + 1).padStart(2, '0')}</span><strong>{r.name}</strong></div><button className="tiny-icon" title="Удалить упражнение" onClick={() => { setRows(old => old.filter((_, k) => k !== i)); setDirty(true) }}><Trash2 size={17}/></button></div>
           <button className="osfit-exercise-summary" onClick={()=>toggleRow(r.id)}><span>{finished?'✓ Завершено · ':''}{r.sets.filter(x=>x.done).length}/{r.sets.length} подходов · {previous(r.name)}</span><span>{collapsed?'Развернуть':'Свернуть'}</span></button>
+          {viewMode==='simple' && editor==='session' && !finished && <div className="osfit-simple"><div className="osfit-simple-plan">{r.sets.length?`${r.sets.find(s=>!s.done)?.weight??r.sets[0].weight} кг × ${r.sets.find(s=>!s.done)?.reps??r.sets[0].reps} · ${r.sets.length} подходов`:'Нет подходов'}</div><div className="osfit-progress-track"><div style={{width:`${r.sets.length?100*r.sets.filter(s=>s.done).length/r.sets.length:0}%`}}/></div><button className="btn primary full" disabled={!r.sets.some(s=>!s.done)} onClick={()=>{const j=r.sets.findIndex(s=>!s.done);if(j>=0)changeSet(i,j,{done:true})}}>✓ Выполнить следующий подход</button>{r.sets.some(s=>s.done)&&<button className="osfit-simple-undo" onClick={()=>{const j=r.sets.map(s=>s.done).lastIndexOf(true);if(j>=0)changeSet(i,j,{done:false})}}>↶ Отменить подход</button>}</div>}
           {!collapsed&&<><div className="osfit-inline-actions"><button onClick={()=>changeExercise(i)}>Заменить упражнение</button><button onClick={()=>setExtrasRows(v=>v.includes(r.id)?v.filter(x=>x!==r.id):[...v,r.id])}>RPE / RIR / темп</button></div>
           <div className="exercise-options"><label>Суперсет <input className="input" placeholder="A, B..." value={r.superset||''} onChange={e=>changeRow(i,x=>({...x,superset:e.target.value}))}/></label><label>Заметка <input className="input" placeholder="Техника" value={r.note||''} onChange={e=>changeRow(i,x=>({...x,note:e.target.value}))}/></label></div>
           <div className="set-headers"><span>Подход</span><span>Вес, кг</span><span>Повторы</span><span>{editor === 'session' ? 'Готово' : 'План'}</span></div>
