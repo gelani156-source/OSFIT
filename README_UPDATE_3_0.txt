@@ -1,0 +1,1 @@
+OSFIT 3.0 complete source package. Contains previously missing Vite/TypeScript/GitHub Pages/PWA configuration files. Source compatibility and npm build NOT yet verified. Backup IndexedDB data before replacing files.

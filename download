@@ -1,6 +1,6 @@
-.DS_Store
 node_modules/
 dist/
-.openai/
+.env
+.env.local
+.DS_Store
 *.log
-Stack-backup-*.json
