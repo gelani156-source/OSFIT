@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import MuscleMap,{exerciseMuscleLoad} from './MuscleMap'
+import MuscleMap, { muscleLoad, exerciseMuscleLoad } from './MuscleMap'
 import {convertIronlog} from './ironlog'
 import {
   Dumbbell, CalendarDays, ChartNoAxesCombined, Plus, Trash2, ChevronLeft,
