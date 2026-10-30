@@ -22,6 +22,8 @@ import {
 
 // OSFIT unified update — templates, portable sessions, responsive SVG and compact UI.
 const OSFIT_CSS = `
+.osfit-goals-panel{margin:18px 0;padding:14px;border:1px solid var(--separator,#39404b);border-radius:16px}.osfit-goal-card{padding:14px;margin:10px 0;border-radius:13px;background:var(--surface-secondary,#20252c);border:1px solid var(--separator,#39404b)}.osfit-goal-card .input{margin:6px 0 12px}.osfit-goal-card p{margin:8px 0}.osfit-goal-card small{opacity:.75}.osfit-goal-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.osfit-goal-progress{height:5px;background:rgba(130,130,140,.25);border-radius:20px;overflow:hidden;margin:12px 0 8px}.osfit-goal-progress>div{height:100%;background:#0a84ff;border-radius:20px}.osfit-goal-alert{padding:12px 16px;border-radius:12px;background:var(--surface-secondary,#20252c);border:1px solid #0a84ff;display:flex;justify-content:space-between;gap:10px}.osfit-goal-alert button{border:0;background:none;color:inherit}
+
 .osfit-exercise-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:transparent;color:inherit;border:0;padding:4px 0}.osfit-exercise-summary strong{font-size:15px}.osfit-completed{opacity:.66}.osfit-extras-toggle{background:#1b2930;border:1px solid #374b54;color:#0a84ff;padding:7px 12px;border-radius:9px;font-size:12px;margin:7px 0}.osfit-group-filters{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.osfit-group-filters button{border:1px solid #3e525b;background:#19242a;color:#c3d5d7;border-radius:15px;padding:8px 12px;font-size:12px}.osfit-group-filters .active{background:#0a84ff;color:#13261c}.osfit-compact .set-row{margin-bottom:4px}.osfit-compact .set-extras{display:none}.osfit-compact .set-row .row-remove{display:none}.osfit-compact .exercise-options{display:none}.osfit-compact .set-row:focus-within .set-extras{display:grid}.osfit-inline-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.osfit-inline-actions button{font-size:12px;padding:7px 10px;border-radius:8px;background:#25333a;color:#e4e4e9;border:1px solid #425861}.osfit-goal{font-size:13px;color:#98989d}.osfit-pick-list{max-height:320px;overflow:auto}.osfit-section{padding:12px;border:1px solid #33444b;border-radius:12px;margin:10px 0}
 
 *,*::before,*::after{box-sizing:border-box}
@@ -167,9 +169,34 @@ export default function App() {
   const [expandedRows,setExpandedRows]=useState<string[]>([])
   const [extrasRows,setExtrasRows]=useState<string[]>([])
   const [undoRows,setUndoRows]=useState<ExerciseLine[][]>([])
-  const [goalInput,setGoalInput]=useState('')
-  const [goalWeight,setGoalWeight]=useState(()=>Number(localStorage.getItem('osfit-goal-weight')||0))
-  const [goalName,setGoalName]=useState(()=>localStorage.getItem('osfit-goal-name')||'Жим штанги лёжа')
+  type GoalKind = 'weight'|'reps'|'estimated'
+  type StrengthGoal = {id:string,exercise:string,kind:GoalKind,target:number,minimumReps:number,referenceWeight:number,createdAt:string,completedAt?:string,achieved?:number}
+  const [goals,setGoals]=useState<StrengthGoal[]>(()=>{try{const raw=JSON.parse(localStorage.getItem('osfit-strength-goals')||'null');if(Array.isArray(raw))return raw;const old=Number(localStorage.getItem('osfit-goal-weight')||0);return old>0?[{id:uid(),exercise:localStorage.getItem('osfit-goal-name')||'Жим штанги лёжа',kind:'estimated',target:old,minimumReps:1,referenceWeight:0,createdAt:new Date().toISOString()}]:[]}catch{return []}})
+  const [goalExercise,setGoalExercise]=useState('')
+  const [goalKind,setGoalKind]=useState<GoalKind>('weight')
+  const [goalTarget,setGoalTarget]=useState('')
+  const [goalReps,setGoalReps]=useState('1')
+  const [goalReferenceWeight,setGoalReferenceWeight]=useState('0')
+  const [goalArchive,setGoalArchive]=useState(false)
+  const [goalNotice,setGoalNotice]=useState<string[]>([])
+  useEffect(()=>{localStorage.setItem('osfit-strength-goals',JSON.stringify(goals))},[goals])
+  const goalScore=(g:StrengthGoal,history:Workout[])=>{
+    let maximum=0
+    for(const w of history)for(const e of w.exercises){if(e.name.trim().toLocaleLowerCase('ru')!==g.exercise.trim().toLocaleLowerCase('ru'))continue
+      for(const set of e.sets){if(!set.done||set.kind==='warmup'||set.weight<0||set.reps<=0)continue
+        const score=g.kind==='weight'?(set.reps>=g.minimumReps?set.weight:0):g.kind==='reps'?(set.weight>=g.referenceWeight?set.reps:0):estimate1RM(set.weight,set.reps)
+        maximum=Math.max(maximum,score)
+      }
+    }
+    return maximum
+  }
+  const addGoal=()=>{const target=Number(goalTarget.replace(',','.'));const reps=Number(goalReps);const referenceWeight=Number(goalReferenceWeight.replace(',','.'))
+    if(!goalExercise.trim()||!Number.isFinite(target)||target<=0||!Number.isInteger(reps)||reps<1||reps>1000||!Number.isFinite(referenceWeight)||referenceWeight<0){setError('Проверьте название, целевое значение и повторения');return}
+    const goal:StrengthGoal={id:uid(),exercise:goalExercise.trim(),kind:goalKind,target,minimumReps:reps,referenceWeight,createdAt:new Date().toISOString()}
+    const current=goalScore(goal,workouts)
+    setGoals(old=>[...old,{...goal,...(current>=target?{completedAt:new Date().toISOString(),achieved:current}:{})}]);setGoalTarget('');setGoalExercise('');tell('Цель добавлена')
+  }
+  useEffect(()=>{if(!workouts.length)return;setGoals(old=>{const newly:string[]=[];const next=old.map(g=>{if(g.completedAt)return g;const value=goalScore(g,workouts);if(value>=g.target){newly.push(g.exercise);return {...g,completedAt:new Date().toISOString(),achieved:value}}return g});if(newly.length)setGoalNotice(newly);return newly.length?next:old})},[workouts])
   const [comparison,setComparison]=useState<[string,string]>(['',''])
   const [backupAt,setBackupAt]=useState(()=>localStorage.getItem('osfit-last-backup')||'')
 
@@ -322,7 +349,7 @@ export default function App() {
     setBackupAt(new Date().toISOString());localStorage.setItem('osfit-last-backup',new Date().toISOString())
     try {
       const data = await exportBackup()
-      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
+      const url = URL.createObjectURL(new Blob([JSON.stringify({...data,strengthGoals:goals}, null, 2)], { type: 'application/json' }))
       const a = document.createElement('a'); a.href = url
       a.download = `osfit-backup-${new Date().toISOString().slice(0, 10)}.json`
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000)
@@ -333,7 +360,7 @@ export default function App() {
     try {
       const payload = JSON.parse(await f.text())
       if (!window.confirm('Импорт заменит все программы и историю. Продолжить?')) return
-      setImporting(true); await importBackup(payload); await load(); setSettings(false)
+      setImporting(true); await importBackup(payload); if(Array.isArray(payload.strengthGoals)){setGoals(payload.strengthGoals.filter((g:StrengthGoal)=>typeof g?.id==='string'&&typeof g.exercise==='string'&&typeof g.target==='number'))}else{setGoals([])} await load(); setSettings(false)
       tell('Данные восстановлены')
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setImporting(false); if (file.current) file.current.value = '' }
@@ -412,6 +439,7 @@ export default function App() {
     </header>
     {error && <div className="error" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
     {notice && <div className="toast">{notice}</div>}
+    {goalNotice.length>0&&<div className="osfit-goal-alert" role="status">🏆 Цель достигнута: {goalNotice.join(', ')} <button onClick={()=>setGoalNotice([])} aria-label="Закрыть">×</button></div>}
     {personalRecord && editor === 'session' && <div className="osfit-pr" role="status"><span>🏆 Новый рекорд 1ПМ: <b>{personalRecord.exercise}</b> · {personalRecord.weight} кг × {personalRecord.reps} (≈{fmt(personalRecord.estimated)} кг)</span><button aria-label="Закрыть уведомление" onClick={()=>setPersonalRecord(null)}>×</button></div>}
     {lastSummary && !editor && <div className="osfit-report" role="region" aria-label="Итоги завершённой тренировки"><div className="osfit-report-head"><strong>✓ Тренировка сохранена · {lastSummary.name}</strong><button onClick={()=>setLastSummary(null)} aria-label="Закрыть отчёт">×</button></div><div className="osfit-report-stats"><span>Упражнений <b>{lastSummary.exercises}</b></span><span>Подходов <b>{lastSummary.sets}</b></span><span>Тоннаж <b>{fmt(lastSummary.volume)} кг</b></span><span>Новых 1ПМ <b>{lastSummary.prs.length}</b></span></div>{lastSummary.prs.length>0&&<p>🏆 {lastSummary.prs.join(', ')}</p>}<p className="muted small">Рекорды рассчитаны по формуле Эпли, а не по фактическому максимуму.</p></div>}
     <style>{OSFIT_CSS + `.osfit-pr,.osfit-report{position:relative;margin:12px 16px;padding:14px;border:1px solid #3f7761;border-radius:14px;background:#172820;color:#e5f6ed;z-index:5}.osfit-pr{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-pr button,.osfit-report-head button{border:0;background:transparent;color:inherit;font-size:24px;cursor:pointer}.osfit-report-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-report-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.osfit-report-stats span{display:flex;flex-direction:column;font-size:12px;color:#acc5b8}.osfit-report-stats b{font-size:17px;color:#ecfff3}.osfit-report p{margin:10px 0 0}`}</style><main className="content">
@@ -423,6 +451,23 @@ export default function App() {
         <h1>Настройки и данные</h1>
         <div className="osfit-settings-row"><ThemeToggle/></div>
         <label className="field-label">Вид тренировки</label><div className="osfit-segmented" role="group" aria-label="Вид тренировки">{(['simple','compact','expanded'] as const).map(v=><button key={v} className={viewMode===v?'active':''} aria-pressed={viewMode===v} onClick={()=>changeViewMode(v)}>{v==='simple'?'Простой':v==='compact'?'Компактный':'Полный'}</button>)}</div>
+        <div className="osfit-goals-panel">
+          <h2>Силовые цели</h2><p className="muted small">Несколько целей по любым упражнениям. Достижение проверяется по выполненным рабочим подходам; цели остаются до выполнения или удаления.</p>
+          <div className="osfit-segmented"><button className={!goalArchive?'active':''} onClick={()=>setGoalArchive(false)}>Активные ({goals.filter(g=>!g.completedAt).length})</button><button className={goalArchive?'active':''} onClick={()=>setGoalArchive(true)}>Достигнутые ({goals.filter(g=>g.completedAt).length})</button></div>
+          {goals.filter(g=>Boolean(g.completedAt)===goalArchive).map(g=>{const bestResult=g.completedAt?(g.achieved??goalScore(g,workouts)):goalScore(g,workouts);const unit=g.kind==='reps'?'повт.':'кг';return <article className="osfit-goal-card" key={g.id}>
+            <div className="osfit-goal-head"><strong>{g.completedAt?'🏆 ':''}{g.exercise}</strong><div style={{display:'flex',alignItems:'center'}}>{!g.completedAt&&<button className="icon-btn" title="Изменить цель" aria-label="Изменить цель" onClick={()=>{const input=window.prompt('Новое целевое значение',String(g.target));if(input===null)return;const newTarget=Number(input.replace(',','.'));if(!(newTarget>0&&Number.isFinite(newTarget))){setError('Введите положительное число');return}setGoals(xs=>xs.map(x=>x.id===g.id?{...x,target:newTarget}:x))}}><PenLine size={17}/></button>}<button className="icon-btn" title="Удалить цель" aria-label="Удалить цель" onClick={()=>{if(window.confirm('Удалить эту цель?'))setGoals(xs=>xs.filter(x=>x.id!==g.id))}}><Trash2 size={17}/></button></div></div>
+            <p>{g.kind==='weight'?`Вес ${g.target} кг × ${g.minimumReps} повторений`:g.kind==='reps'?`${g.target} повторений при весе от ${g.referenceWeight} кг`:`Расчётный 1ПМ ${g.target} кг`}</p>
+            <div className="osfit-goal-progress"><div style={{width:`${Math.min(100,Math.max(0,bestResult/g.target*100))}%`}}/></div>
+            <small>{g.completedAt?`Достигнута ${new Date(g.completedAt).toLocaleDateString('ru-RU')} · результат ${Number(bestResult.toFixed(2))} ${unit}`:`Лучший результат: ${Number(bestResult.toFixed(2))} ${unit}`}</small>
+          </article>})}
+          {!goalArchive&&<div className="osfit-goal-card"><strong>Добавить цель</strong><label className="field-label">Упражнение</label><input className="input" list="osfit-goal-exercises" placeholder="Название упражнения" value={goalExercise} onChange={e=>setGoalExercise(e.target.value)}/><datalist id="osfit-goal-exercises">{Array.from(new Set([...exerciseCatalog,...programs.flatMap(p=>p.exercises.map(e=>e.name))])).map(x=><option key={x} value={x}/>)}</datalist>
+            <label className="field-label">Показатель</label><select className="input" value={goalKind} onChange={e=>setGoalKind(e.target.value as GoalKind)}><option value="weight">Вес и повторения</option><option value="reps">Повторения при заданном весе</option><option value="estimated">Расчётный 1ПМ</option></select>
+            <label className="field-label">Целевое значение ({goalKind==='reps'?'повторения':'кг'})</label><input className="input" type="number" min="0" step="any" inputMode="decimal" value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/>
+            {goalKind==='weight'&&<><label className="field-label">Минимум повторений с этим весом</label><input className="input" type="number" min="1" step="1" value={goalReps} onChange={e=>setGoalReps(e.target.value)}/></>}
+            {goalKind==='reps'&&<><label className="field-label">Минимальный вес (кг, 0 — без веса)</label><input className="input" type="number" min="0" step="any" value={goalReferenceWeight} onChange={e=>setGoalReferenceWeight(e.target.value)}/></>}
+            <button className="btn primary full" onClick={addGoal}><Plus size={17}/> Сохранить цель</button>
+          </div>}
+        </div>
         <p className="muted">Данные хранятся только в этом браузере. Создавайте резервные копии.</p>
         <button className="btn primary full" onClick={() => void download()}><Download size={18}/> Скачать архив JSON</button>
         <button className="btn secondary full" disabled={importing} onClick={() => file.current?.click()}><Upload size={18}/> Восстановить из JSON</button>
@@ -502,7 +547,6 @@ export default function App() {
         <div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={() => beginProgram()}><Plus size={17}/> Создать</button></div>
         {draft&&<button className="btn primary full" onClick={restoreDraft}>Продолжить незавершённую тренировку</button>}
         <button className="btn secondary full" onClick={() => setShowTemplates(v=>!v)}><Dumbbell size={17}/> Готовые системы тренировок</button>
-        <div className="osfit-section"><strong>Цель по упражнению</strong><div className="osfit-input-row"><input className="input" value={goalName} onChange={e=>setGoalName(e.target.value)} placeholder="Упражнение"/><input className="input" type="number" style={{maxWidth:90}} placeholder="кг" value={goalInput} onChange={e=>setGoalInput(e.target.value)}/><button className="btn secondary compact" onClick={()=>{const v=Number(goalInput);if(v>0){setGoalWeight(v);localStorage.setItem('osfit-goal-weight',String(v));localStorage.setItem('osfit-goal-name',goalName)}}}>Цель</button></div>{goalWeight>0&&<div className="osfit-goal">{goalName}: цель {goalWeight} кг, лучший расчётный 1ПМ {Math.round(best.get(goalName)||0)} кг</div>}</div>
         {backupAt&&<p className="osfit-helper">Последняя резервная копия: {new Date(backupAt).toLocaleDateString('ru-RU')}</p>}
         {workouts.length>0&&<details className="osfit-section"><summary>Рабочий объём по группам за 7 дней</summary>{groups.filter(g=>g!=='Все').map(g=><p key={g} className="osfit-goal">{g}: {weeklyMuscleSets(workouts,g)} подходов</p>)}</details>}
         {showTemplates&&<div className="osfit-template-list">{PLAN_TEMPLATES.map((t,i)=><button key={t.title} onClick={()=>void createTemplate(i)}><strong>{t.title}</strong><small>{t.desc} · создаст {t.days.length} программы</small></button>)}</div>}
