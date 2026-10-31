@@ -1,63 +1,70 @@
-import {useEffect,useMemo,useRef,useState} from 'react'
-import {BodyChart, ViewSide, FRONT_MUSCLES, BACK_MUSCLES} from 'body-muscles'
+import {useMemo, useState} from 'react'
+import {MuscleMap as RichMuscleMap} from 'js-rich-body-highlighter/react'
 import type {Muscle} from './MuscleMap'
+import './anatomyBright.css'
 
-const mapping:Record<Muscle,string[]>={
- chest:['chest-'],frontDelts:['shoulder-front-'],sideDelts:['shoulder-side-'],rearDelts:['deltoid-rear-'],
- biceps:['biceps-'],triceps:['triceps-'],abs:['abs-','obliques-','serratus-'],
- back:['lats-','lower-back-','spine'],traps:['traps-'],glutes:['gluteus-'],
- quads:['quads-'],hamstrings:['hamstrings-'],calves:['calves-']
+const labels:Record<Muscle,string>={
+  chest:'Грудные',frontDelts:'Передняя дельта',sideDelts:'Средняя дельта',
+  rearDelts:'Задняя дельта',biceps:'Бицепс',triceps:'Трицепс',
+  abs:'Пресс',back:'Спина',traps:'Трапеции',glutes:'Ягодичные',
+  quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'
 }
-const names:Record<Muscle,string>={
- chest:'Грудные',frontDelts:'Передняя дельта',sideDelts:'Средняя дельта',rearDelts:'Задняя дельта',
- biceps:'Бицепс',triceps:'Трицепс',abs:'Пресс',back:'Спина',traps:'Трапеции',
- glutes:'Ягодичные',quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'
+const keys=Object.keys(labels) as Muscle[]
+const groups:Record<string,Muscle[]>={
+  chest:['chest'],
+  shoulders:['frontDelts','sideDelts','rearDelts'],
+  biceps:['biceps'],triceps:['triceps'],
+  abs:['abs'],obliques:['abs'],
+  upper_back:['traps','rearDelts'],
+  lats:['back'],lower_back:['back'],
+  glutes:['glutes'],quads:['quads'],
+  hamstrings:['hamstrings'],calves:['calves']
 }
-const keys=Object.keys(names) as Muscle[]
-function mapId(id:string):Muscle|null{
-  for(const key of keys) if(mapping[key].some(prefix=>id===prefix||id.startsWith(prefix))) return key
-  return null
-}
-// Keep calculation precision in memory; round only for display.
-const fmtLoad=(value: number | undefined): string => {
-  const n=Number(value ?? 0)
-  return Number.isFinite(n) ? String(Math.round((n + Number.EPSILON)*10)/10) : '0'
+function fmt(n:number | undefined){
+ const value=Number(n||0)
+ return Number.isFinite(value)?(Math.round((value+Number.EPSILON)*10)/10).toLocaleString('ru-RU'):'0'
 }
 
 export default function AnatomyMuscleMap({loads,sex}:{loads:Record<Muscle,number>,sex:'male'|'female'}){
-  const [side,setSide]=useState<'front'|'back'>('front')
-  const [selected,setSelected]=useState<Muscle|null>(null)
-  const host=useRef<HTMLDivElement>(null)
-  const chart=useRef<BodyChart|null>(null)
-  const max=Math.max(1,...Object.values(loads).filter(Number.isFinite))
-  const state=useMemo(()=>{
-    const result:Record<string,{intensity:number,selected:boolean}>={}
-    for(const part of [...FRONT_MUSCLES,...BACK_MUSCLES]){
-      const key=mapId(part.id)
-      const n=key?Number(loads[key]||0):0
-      if(key)result[part.id]={intensity:n>0?Math.max(1,Math.min(10,Math.round(10*n/max))):0,selected:selected===key}
-    }
-    return result
-  },[loads,max,selected])
-  useEffect(()=>{
-    if(!host.current)return
-    const instance=new BodyChart(host.current,{
-      view:side==='front'?ViewSide.FRONT:ViewSide.BACK,bodyState:state,
-      ariaLabel:'Анатомическая карта мышц OSFIT',enableTransitions:true,
-      onMuscleClick:(id)=>{const key=mapId(id);if(key)setSelected(old=>old===key?null:key)}
-    })
-    chart.current=instance
-    return ()=>{instance.destroy();chart.current=null}
-  },[])
-  useEffect(()=>{chart.current?.update({view:side==='front'?ViewSide.FRONT:ViewSide.BACK,bodyState:state})},[side,state])
-  return <div className="osfit-anatomy">
-    <div className="osfit-view-buttons" role="group" aria-label="Ракурс атлета">
-      <button className={side==='front'?'active':''} type="button" onClick={()=>setSide('front')}>Спереди</button>
-      <button className={side==='back'?'active':''} type="button" onClick={()=>setSide('back')}>Сзади</button>
-    </div>
-    <div className="osfit-anatomy-viewport" ref={host}/>
-    <p className="osfit-anatomy-hint">{selected?`${names[selected]}: ${fmtLoad(loads[selected])} усл. подходов`:'Нажми на мышцу для подробностей'}</p>
-    <div className="muscle-legend">{keys.map(key=><button type="button" key={key} className={selected===key?'active':''} onClick={()=>setSelected(x=>x===key?null:key)}><span>{names[key]}</span><b>{fmtLoad(loads[key])}</b></button>)}</div>
-    <p className="osfit-anatomy-credit">Анатомическая модель: body-muscles · Apache-2.0. Нагрузка рассчитана по данным OSFIT.</p>
+ const [side,setSide]=useState<'front'|'back'>('front')
+ const [selected,setSelected]=useState<Muscle|null>(null)
+ const max=Math.max(1,...Object.values(loads).filter(Number.isFinite))
+ const highlights=useMemo(()=>Object.entries(groups).map(([group,ids])=>{
+   // Secondary muscles contribute to the same anatomical group but do not get counted twice.
+   const amount=ids.reduce((sum,id)=>sum+(Number(loads[id])||0),0)
+   const active=ids.some(id=>id===selected)
+   return {
+     group,
+     intensity: active?100:amount>0?Math.max(58,Math.min(95,Math.round(amount/max*100))):0,
+     color:active?'#5ad6ff':'#ff584a'
+   }
+ }).filter(x=>x.intensity>0),[loads,max,selected])
+ const selectGroup=(g:string)=>{
+   const ids=groups[g]
+   if(!ids?.length)return
+   const k=ids.find(id=>(Number(loads[id])||0)>0)||ids[0]
+   setSelected(old=>old===k?null:k)
+ }
+ return <div className="osfit-anatomy osfit-rich-anatomy">
+  <div className="osfit-view-buttons" role="group" aria-label="Ракурс атлета">
+   <button type="button" className={side==='front'?'active':''} onClick={()=>setSide('front')}>Спереди</button>
+   <button type="button" className={side==='back'?'active':''} onClick={()=>setSide('back')}>Сзади</button>
   </div>
+  <p className="osfit-anatomy-hint">{sex==='female'?'Женская модель':'Мужская модель'} · Нажми на мышцу для подробностей</p>
+  <div className="osfit-anatomy-viewport osfit-rich-viewport">
+   <RichMuscleMap
+     gender={sex} view={side} theme="dark" width="100%"
+     highlights={highlights} blendMode="normal"
+     hoverHighlight hoverIntensity={92} hoverColor="#5ad6ff"
+     onMuscleClick={(muscle)=>selectGroup(muscle.group)}
+   />
+  </div>
+  {selected&&<p className="osfit-anatomy-hint">Выбрано: {labels[selected]} · {fmt(loads[selected])} усл. подходов</p>}
+  <div className="muscle-legend">
+   {keys.map(key=><button key={key} type="button" className={selected===key?'active':''} onClick={()=>setSelected(x=>x===key?null:key)}>
+    <span>{labels[key]}</span><b>{fmt(loads[key])}</b>
+   </button>)}
+  </div>
+  <p className="osfit-anatomy-credit">Модель: js-rich-body-highlighter · MIT. Интенсивность основана на данных OSFIT.</p>
+ </div>
 }

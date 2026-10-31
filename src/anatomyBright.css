@@ -1,0 +1,9 @@
+
+/* OSFIT 5.9 — visible load highlights and gender-specific anatomy */
+.osfit-rich-anatomy{max-width:680px;margin-inline:auto}
+.osfit-rich-viewport{height:auto!important;min-height:0!important;max-width:420px;overflow:hidden!important;display:block!important;margin-inline:auto}
+.osfit-rich-viewport>div{width:100%;max-width:420px;margin-inline:auto}
+.osfit-rich-viewport svg{width:100%!important;height:auto!important;max-height:none!important;display:block}
+.osfit-rich-viewport svg path{stroke:none!important;transition:opacity .16s ease}
+.osfit-rich-viewport svg path:hover{stroke:none!important}
+.osfit-rich-anatomy .muscle-legend b{flex-shrink:0;max-width:70px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
