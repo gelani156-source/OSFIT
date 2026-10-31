@@ -22,6 +22,57 @@ import {
 } from './model'
 
 
+// Restore portable JSON/CSV/XLSX imports (OSFIT 5.5 hotfix).
+function fromPortableJson(raw: unknown): ExerciseLine[] {
+  if (!raw || typeof raw !== 'object') throw new Error('Неверный JSON тренировки')
+  const obj = raw as Record<string, unknown>
+  const source = Array.isArray(obj.exercises) ? obj.exercises : Array.isArray(obj.rows) ? obj.rows : null
+  if (!source) throw new Error('JSON должен содержать exercises или rows')
+  return source.map((entry: unknown): ExerciseLine => {
+    const e = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>
+    const name = normalizedExerciseName(String(e.name || e.exercise || 'Упражнение'))
+    const sourceSets = Array.isArray(e.sets) ? e.sets : []
+    const sets: SetLine[] = sourceSets.map((entry: unknown): SetLine => {
+      const t = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>
+      return { ...blankSet(), weight: Math.max(0,Number(t.weight)||0), reps: Math.max(0,Number(t.reps)||0), done: t.done === true, ...(typeof t.kind==='string' && ['warmup','work','drop'].includes(t.kind) ? {kind:t.kind as SetLine['kind']} : {}), ...(typeof t.tempo==='string'?{tempo:t.tempo}:{}), ...(typeof t.note==='string'?{note:t.note}:{}) }
+    })
+    return { id:uid(), name, sets, ...(typeof e.note==='string'?{note:e.note}:{}), ...(typeof e.superset==='string'?{superset:e.superset}:{}) }
+  })
+}
+
+function tableToTraining(rows: unknown[][]): ExerciseLine[] {
+  const cleaned = rows.map(r=>r.map(v=>String(v??'').trim())).filter(r=>r.some(Boolean))
+  if(!cleaned.length) return []
+  const first=cleaned[0].map(x=>x.toLocaleLowerCase('ru').replace(/\s+/g,' '))
+  const index=(words:string[])=>first.findIndex(c=>words.some(w=>c===w||c.includes(w)))
+  const nameCol=index(['упражнен','exercise','название'])
+  const weightCol=index(['вес','weight','кг','плитк'])
+  const repsCol=index(['повтор','reps','повт'])
+  const setsCol=index(['подход','sets','сет'])
+  const doneCol=index(['выполн','done','готов'])
+  const header=nameCol>=0 && (weightCol>=0||repsCol>=0||setsCol>=0)
+  const nc=header?nameCol:0, wc=header?weightCol:1, rc=header?repsCol:2, sc=header?setsCol:3
+  const result:ExerciseLine[]=[]
+  const parseNum=(v:string)=>Number(v.replace(/\s/g,'').replace(',','.'))
+  for(const row of cleaned.slice(header?1:0)){
+    const name=normalizedExerciseName(row[nc]||'')
+    if(!name) continue
+    const weight=wc>=0 && Number.isFinite(parseNum(row[wc]||''))?Math.max(0,parseNum(row[wc])):0
+    const reps=rc>=0 && Number.isFinite(parseNum(row[rc]||''))?Math.max(0,parseNum(row[rc])):0
+    const count=sc>=0 && Number.isFinite(parseNum(row[sc]||''))?Math.min(30,Math.max(1,Math.trunc(parseNum(row[sc])))):1
+    const isDone=doneCol>=0 && /^(да|true|1|yes|✓|готово)$/i.test(row[doneCol]||'')
+    let exercise=result.find(x=>x.name===name)
+    if(!exercise){exercise={id:uid(),name,sets:[]};result.push(exercise)}
+    for(let i=0;i<count;i++)exercise.sets.push({...blankSet(),weight,reps,done:isDone})
+  }
+  return result
+}
+
+async function xlsxAsRows(file:File):Promise<unknown[][]> {
+  const readXlsx=(await import('read-excel-file')).default
+  return await readXlsx(file) as unknown[][]
+}
+
 // OSFIT unified update — templates, portable sessions, responsive SVG and compact UI.
 const OSFIT_CSS = `
 .osfit-goals-panel{margin:18px 0;padding:14px;border:1px solid var(--separator,#39404b);border-radius:16px}.osfit-goal-card{padding:14px;margin:10px 0;border-radius:13px;background:var(--surface-secondary,#20252c);border:1px solid var(--separator,#39404b)}.osfit-goal-card .input{margin:6px 0 12px}.osfit-goal-card p{margin:8px 0}.osfit-goal-card small{opacity:.75}.osfit-goal-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.osfit-goal-progress{height:5px;background:rgba(130,130,140,.25);border-radius:20px;overflow:hidden;margin:12px 0 8px}.osfit-goal-progress>div{height:100%;background:#0a84ff;border-radius:20px}.osfit-goal-alert{padding:12px 16px;border-radius:12px;background:var(--surface-secondary,#20252c);border:1px solid #0a84ff;display:flex;justify-content:space-between;gap:10px}.osfit-goal-alert button{border:0;background:none;color:inherit}
