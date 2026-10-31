@@ -1,3 +1,4 @@
+import AnatomyMuscleMap from './AnatomyMuscleMap'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {ThemeToggle} from './ThemeToggle'
 import WorkoutMiniWidget from './WorkoutMiniWidget'
@@ -6,6 +7,7 @@ import type {Muscle} from './MuscleMap'
 import {groups, groupFor, suggestions, serializeProgram, readProgramFile, getExerciseAlternative, weeklyMuscleSets, bodyPartPrompt} from './smart'
 
 import {convertIronlog} from './ironlog'
+import {readWidgetAction,updateExercise,widgetPayload} from './widgetBridge'
 import {
   Dumbbell, CalendarDays, ChartNoAxesCombined, Plus, Trash2, ChevronLeft,
   Check, Download, Upload, Settings, Save, Play, Copy, PenLine, ArrowLeft, Search, Activity
@@ -47,6 +49,42 @@ const OSFIT_CSS = `
 .osfit-view-buttons button{border:1px solid #47565b;border-radius:9px;background:#1d282d;color:#dde8e8;padding:9px 16px}
 .osfit-view-buttons button.active{border-color:#0a84ff;color:#0a84ff}
 @media(max-width:390px){.content{padding-inline:14px}.card{padding-inline:14px}.measure-grid{gap:8px}.bottom-nav button span{font-size:10px}}
+
+/* OSFIT 5.4 / unified mobile polish */
+:root{--osfit-bg:var(--background,#101214);--osfit-card:var(--surface-secondary,#1e242a);--osfit-border:var(--border,#37424d);--osfit-text:var(--text,#eaeef2)}
+html{background:var(--osfit-bg);scroll-padding-top:calc(18px + env(safe-area-inset-top,0px))}
+body,#root,.app{background:var(--osfit-bg);color:var(--osfit-text)}
+.app{min-height:100dvh;overflow-x:hidden}
+.header{display:flex;align-items:center;justify-content:flex-start;gap:14px;min-height:64px;padding:calc(12px + env(safe-area-inset-top,0px)) 18px 12px;position:relative;top:auto;background:var(--osfit-bg);border-bottom:1px solid var(--osfit-border)}
+.header .brand{flex:1;min-width:0}.header .osfit-settings-button{order:-1;flex:0 0 44px;width:44px;height:44px;display:grid;place-items:center;border:1px solid var(--osfit-border);border-radius:14px;background:var(--osfit-card);color:var(--osfit-text)}
+.content{padding-top:20px;padding-bottom:calc(100px + env(safe-area-inset-bottom,0px));overflow-wrap:anywhere}
+.page-heading,.content section>h1,.content section>.eyebrow{position:relative;z-index:1}
+.page-heading h1,.content section>h1{line-height:1.12;letter-spacing:-.035em;margin-top:10px}
+.eyebrow{font-size:11px;letter-spacing:.13em;font-weight:750;color:var(--accent)}
+.card{background:var(--osfit-card);border:1px solid var(--osfit-border);border-radius:20px}
+.input,.content input[type=date],.content input[type=month],.content select{min-height:46px;border-radius:13px;border:1px solid var(--osfit-border);background:var(--osfit-card);color:var(--osfit-text)}
+.btn{border-radius:13px}.bottom-nav{background:var(--osfit-bg);border-top:1px solid var(--osfit-border)}
+.calendar-grid{display:grid!important;grid-template-columns:repeat(7,minmax(0,1fr))!important;gap:5px!important;align-items:stretch;width:100%;margin:14px 0 20px}
+.calendar-grid>.calendar-weekday{display:flex;align-items:center;justify-content:center;height:32px;min-width:0;font-size:12px;font-weight:700;color:var(--muted,#9da6b0);letter-spacing:0}
+.calendar-grid>.calendar-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;aspect-ratio:1;min-width:0;min-height:0;width:100%;padding:1px!important;border-radius:12px!important;border:1px solid var(--osfit-border)!important;background:var(--osfit-card)!important;color:var(--osfit-text)!important;font-weight:600;font-size:14px;line-height:1.1;box-shadow:none;transition:border-color .15s ease}
+.calendar-grid>.calendar-day small{font-size:9px;line-height:1;color:var(--accent)}
+.calendar-grid>.calendar-day.today{border:2px solid var(--accent)!important}
+.calendar-grid>.calendar-day.trained{background:color-mix(in srgb,var(--accent) 18%,var(--osfit-card))!important;border-color:var(--accent)!important}
+.calendar-grid>.calendar-day.planned:not(.trained){border-color:#38a6a5!important}
+.calendar-grid>.calendar-day:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.calendar-grid>.calendar-empty{min-width:0}
+.osfit-period-pills{gap:8px}.osfit-period-pills button{min-height:44px;border-radius:13px;font-size:12px}
+.osfit-view-buttons button{border-radius:12px;min-height:42px;background:var(--osfit-card);color:var(--osfit-text);border-color:var(--osfit-border)}
+.osfit-sex-svg{max-width:350px;max-height:500px;filter:drop-shadow(0 8px 22px rgba(0,0,0,.16))}
+.muscle-legend{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px!important;margin:16px 0}
+.muscle-legend button{width:100%;min-width:0;min-height:48px;display:flex!important;gap:7px;align-items:center;justify-content:space-between;text-align:left;border:1px solid var(--osfit-border);border-radius:12px!important;background:var(--osfit-card)!important;color:var(--osfit-text)!important;padding:10px!important;font-size:12px}
+.muscle-legend button span{min-width:0;line-height:1.3;overflow-wrap:anywhere}.muscle-legend button b{font-size:13px;color:var(--accent);font-variant-numeric:tabular-nums}
+.muscle-legend button.active{border-color:var(--accent)}
+.ios-theme-setting{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:54px;color:var(--osfit-text)}
+.ios-theme-switch{flex:0 0 auto;position:relative;width:52px;height:32px;padding:2px;border:0;border-radius:100px;background:#777d84;cursor:pointer;transition:background .18s}
+.ios-theme-switch.is-on{background:#0a84ff}.ios-theme-thumb{display:block;width:28px;height:28px;border-radius:50%;background:white;box-shadow:0 2px 5px #0004;transition:transform .18s}.ios-theme-switch.is-on .ios-theme-thumb{transform:translateX(20px)}
+.ios-theme-switch:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media(max-width:390px){.calendar-grid{gap:4px!important}.calendar-grid>.calendar-day{border-radius:10px!important;font-size:13px}.muscle-legend button{font-size:11px;padding:8px!important}}
 `;
 const PLAN_TEMPLATES: {title:string,desc:string,days:{name:string,items:[string,number,number][]}[]}[]=[
 {title:'Фулбади A/B/C',desc:'3 дня · всё тело',days:[{name:'Фулбади A',items:[['Присед со штангой',3,8],['Жим штанги лёжа',3,8],['Тяга штанги в наклоне',3,10],['Планка',3,30]]},{name:'Фулбади B',items:[['Румынская тяга',3,8],['Жим стоя',3,8],['Тяга верхнего блока',3,10],['Выпады',3,10]]},{name:'Фулбади C',items:[['Жим ногами',3,10],['Жим гантелей лёжа',3,10],['Подтягивания',3,8],['Скручивания',3,15]]}]},
@@ -58,69 +96,10 @@ const PLAN_TEMPLATES: {title:string,desc:string,days:{name:string,items:[string,
 ];
 const toLines=(items:[string,number,number][]):ExerciseLine[]=>items.map(([name,n,reps])=>({id:uid(),name,sets:Array.from({length:n},()=>({...blankSet(),reps}))}));
 
-// Improved SVG layer mapping with clearer segmentation of deltas and more anatomical figure.
+// Anatomical SVG map is rendered by the maintained body-muscles library.
+// The exercise statistics still come exclusively from OSFIT's own MuscleMap.ts.
 function MuscleMap({loads,sex='male'}:{loads:Record<Muscle,number>,sex?:'male'|'female'}){
- const [side,setSide]=useState<'front'|'back'>('front')
- const [selected,setSelected]=useState<Muscle|null>(null)
- const female=sex==='female'
- const max=Math.max(1,...Object.values(loads))
- const outlineFront=female?
- 'M83 18 Q73 18 68 28 Q63 39 66 53 Q69 68 79 76 L79 94 Q60 101 53 122 L43 177 36 221 Q34 231 42 235 Q48 238 54 229 L65 194 73 160 79 132 L82 177 78 230 Q75 252 80 272 L85 304 89 354 88 411 Q88 427 96 427 Q101 427 102 411 L104 351 108 306 112 272 Q117 252 114 230 L110 177 113 132 120 160 128 194 139 229 Q145 238 151 235 Q159 231 157 221 L150 177 140 122 Q133 101 114 94 L114 76 Q124 68 127 53 Q130 39 125 28 Q120 18 110 18 Z':
- 'M81 16 Q70 17 64 29 Q60 39 63 55 Q66 71 78 80 L78 94 Q56 101 49 124 L39 181 31 223 Q30 235 39 238 Q48 240 55 231 L67 195 76 155 80 130 L83 174 79 232 Q75 258 81 282 L87 314 92 360 91 413 Q91 428 97 428 Q103 428 109 413 L108 360 113 314 119 282 Q125 258 121 232 L117 174 120 130 124 155 133 195 145 231 Q152 240 161 238 Q170 235 169 223 L161 181 151 124 Q144 101 122 94 L122 80 Q134 71 137 55 Q140 39 136 29 Q130 17 119 16 Z'
- const outlineBack=female?
- 'M83 18 Q73 18 68 28 Q63 39 66 53 Q69 68 79 76 L79 94 Q60 101 53 122 L43 177 36 221 Q34 231 42 235 Q48 238 54 229 L65 194 73 160 79 132 L82 177 78 230 Q75 252 80 272 L85 304 89 354 88 411 Q88 427 96 427 Q101 427 102 411 L104 351 108 306 112 272 Q117 252 114 230 L110 177 113 132 120 160 128 194 139 229 Q145 238 151 235 Q159 231 157 221 L150 177 140 122 Q133 101 114 94 L114 76 Q124 68 127 53 Q130 39 125 28 Q120 18 110 18 Z':
- 'M81 16 Q70 17 64 29 Q60 39 63 55 Q66 71 78 80 L78 94 Q56 101 49 124 L39 181 31 223 Q30 235 39 238 Q48 240 55 231 L67 195 76 155 80 130 L83 174 79 232 Q75 258 81 282 L87 314 92 360 91 413 Q91 428 97 428 Q103 428 109 413 L108 360 113 314 119 282 Q125 258 121 232 L117 174 120 130 124 155 133 195 145 231 Q152 240 161 238 Q170 235 169 223 L161 181 151 124 Q144 101 122 94 L122 80 Q134 71 137 55 Q140 39 136 29 Q130 17 119 16 Z'
- const parts:{id:Muscle,side:'front'|'back'|'both',d:string}[]=[
-  {id:'frontDelts',side:'front',d:'M63 106 Q71 95 82 102 L79 129 61 124 Z M137 106 Q129 95 118 102 L121 129 139 124 Z'},
-  {id:'sideDelts',side:'both',d:'M54 112 Q63 98 76 103 L69 136 53 129 Z M146 112 Q137 98 124 103 L131 136 147 129 Z'},
-  {id:'rearDelts',side:'back',d:'M57 108 Q68 96 80 104 L72 136 56 129 Z M143 108 Q132 96 120 104 L128 136 144 129 Z'},
-  {id:'chest',side:'front',d:'M78 108 Q91 100 98 111 L98 145 72 137 Z M122 108 Q109 100 102 111 L102 145 128 137 Z'},
-  {id:'biceps',side:'front',d:'M56 132 L71 139 68 176 54 171 Z M144 132 L129 139 132 176 146 171 Z'},
-  {id:'triceps',side:'back',d:'M54 131 L69 138 66 178 52 172 Z M146 131 L131 138 134 178 148 172 Z'},
-  {id:'abs',side:'front',d:'M86 152 L114 152 114 205 Q100 213 86 205 Z'},
-  {id:'traps',side:'back',d:'M79 93 Q90 85 100 96 Q110 85 121 93 L131 117 111 128 100 117 89 128 69 117 Z'},
-  {id:'back',side:'back',d:'M74 122 L96 136 96 206 82 215 74 174 Z M126 122 L104 136 104 206 118 215 126 174 Z'},
-  {id:'glutes',side:'back',d:'M78 229 Q88 221 98 232 L95 264 Q82 269 75 248 Z M122 229 Q112 221 102 232 L105 264 Q118 269 125 248 Z'},
-  {id:'quads',side:'front',d:'M82 272 L99 277 97 338 86 348 80 315 Z M118 272 L101 277 103 338 114 348 120 315 Z'},
-  {id:'hamstrings',side:'back',d:'M82 272 L99 277 95 341 84 349 80 316 Z M118 272 L101 277 105 341 116 349 120 316 Z'},
-  {id:'calves',side:'back',d:'M85 353 Q92 348 96 360 L92 398 Q88 408 83 392 Z M115 353 Q108 348 104 360 L108 398 Q112 408 117 392 Z'}
- ]
- const names:Record<Muscle,string>={chest:'Грудные',frontDelts:'Дельты — передняя',sideDelts:'Дельты — средняя',rearDelts:'Дельты — задняя',biceps:'Бицепсы',triceps:'Трицепсы',abs:'Пресс',back:'Широчайшие / спина',traps:'Трапеции',glutes:'Ягодицы',quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'}
- const all=['chest','frontDelts','sideDelts','rearDelts','biceps','triceps','back','traps','abs','glutes','quads','hamstrings','calves'] as Muscle[]
- const backOnly:Muscle[]=['rearDelts','triceps','back','traps','glutes','hamstrings','calves']
- const figureFill=(v:number)=>v>0?`rgba(138,231,181,${0.2+0.7*v/max})`:'rgba(53,76,86,0.78)'
- return <div className="muscle-layout"><div className="osfit-view-buttons"><button className={side==='front'?'active':''} onClick={()=>setSide('front')}>Спереди</button><button className={side==='back'?'active':''} onClick={()=>setSide('back')}>Сзади</button></div>
- <svg className="osfit-sex-svg" viewBox="0 0 200 440" role="img" aria-label={female?'Женская анатомическая модель':'Мужская анатомическая модель'}>
- <defs>
-   <linearGradient id="osfitFigure2" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#2f4551"/><stop offset="1" stopColor="#16242d"/></linearGradient>
-   <linearGradient id="osfitMuscleGlow" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#a8f1c5" stopOpacity="0.95"/><stop offset="1" stopColor="#6fcf97" stopOpacity="0.95"/></linearGradient>
- </defs>
- <g fill="none" stroke="#405965" strokeWidth="1.4" strokeLinejoin="round">
-   <path d={side==='front'?outlineFront:outlineBack} fill="url(#osfitFigure2)"/>
-   <path d="M100 42 L100 82" opacity="0.5"/>
-   {side==='front' ? <><path d="M83 155 L117 155" opacity="0.35"/><path d="M86 172 L114 172" opacity="0.3"/><path d="M88 188 L112 188" opacity="0.25"/><path d="M100 146 L100 206" opacity="0.35"/></> : <><path d="M80 128 Q100 140 120 128" opacity="0.35"/><path d="M82 154 Q100 167 118 154" opacity="0.28"/><path d="M84 180 Q100 191 116 180" opacity="0.22"/></>}
- </g>
- <g transform={female?'translate(0 0) scale(0.98 1)':undefined}>{parts.filter(z=>z.side===side||z.side==='both').map(z=>{const v=loads[z.id]||0;return <path key={z.id} role="button" tabIndex={0} aria-label={`${names[z.id]}, нагрузка ${v}`} onClick={()=>setSelected(z.id)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')setSelected(z.id)}} d={z.d} fill={v>0?'url(#osfitMuscleGlow)':figureFill(v)} stroke={selected===z.id?'#ffffff':'#6f8f96'} strokeWidth={selected===z.id?2.4:1.15} opacity={v>0?Math.min(1,0.55+v/max*0.45):1} style={{cursor:'pointer'}}><title>{names[z.id]}</title></path>})}</g></svg>
- <p className="muted small" style={{textAlign:'center'}}>{selected?`${names[selected]}: ${(loads[selected]||0).toFixed(0)} рабочих подходов`:`Период показывает завершённые подходы за выбранные календарные дни. Дельты разделены на переднюю, среднюю и заднюю части.`}</p>
- <div className="muscle-legend">{all.map(k=><button key={k} className={selected===k?'active':''} onClick={()=>{setSelected(k);setSide(backOnly.includes(k)?'back':'front')}}><span>{names[k]}</span><b>{(loads[k]||0).toFixed(0)}</b></button>)}</div>
- <p className="muted small">Схематическая карта нагрузки: одно упражнение может одновременно добавлять подходы в несколько связанных мышечных групп.</p></div>
-}
-
-// Compact local ZIP/XLSX reader. Only simple .xlsx worksheets; formulas are read via cached values.
-async function xlsxAsRows(file:File):Promise<string[][]>{
- const bytes=new Uint8Array(await file.arrayBuffer()),view=new DataView(bytes.buffer);let end=-1;
- for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--)if(view.getUint32(i,true)===0x06054b50){end=i;break}
- if(end<0)throw new Error('Не найден ZIP-контейнер XLSX');let pos=view.getUint32(end+16,true);const count=view.getUint16(end+10,true);const entries=new Map<string,{offset:number,packed:number,method:number}>();
- for(let j=0;j<count;j++){if(view.getUint32(pos,true)!==0x02014b50)break;const method=view.getUint16(pos+10,true),packed=view.getUint32(pos+20,true),nl=view.getUint16(pos+28,true),el=view.getUint16(pos+30,true),cl=view.getUint16(pos+32,true),offset=view.getUint32(pos+42,true);const name=new TextDecoder().decode(bytes.slice(pos+46,pos+46+nl));entries.set(name,{offset,packed,method});pos+=46+nl+el+cl}
- async function read(name:string){const e=entries.get(name);if(!e)return '';const start=e.offset+30+view.getUint16(e.offset+26,true)+view.getUint16(e.offset+28,true),data=bytes.slice(start,start+e.packed);if(e.method===0)return new TextDecoder().decode(data);if(e.method!==8)throw new Error('Неподдерживаемое сжатие XLSX');const stream=new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw' as CompressionFormat));return await new Response(stream).text()}
- const shared=await read('xl/sharedStrings.xml');const doc=new DOMParser();const strings=shared?Array.from(doc.parseFromString(shared,'text/xml').getElementsByTagName('si')).map(el=>el.textContent||''):[];const path=Array.from(entries.keys()).find(x=>/^xl\/worksheets\/sheet\d+\.xml$/.test(x));if(!path)throw new Error('Лист XLSX не найден');const xml=doc.parseFromString(await read(path),'text/xml');const rows=Array.from(xml.getElementsByTagName('row')).slice(0,2000);return rows.map(row=>{const result:string[]=[];for(const cell of Array.from(row.getElementsByTagName('c'))){const ref=cell.getAttribute('r')||'A';let idx=0;for(const ch of (ref.match(/^[A-Z]+/)?.[0]||'A'))idx=idx*26+ch.charCodeAt(0)-64;idx--;if(idx>80)continue;const value=cell.getElementsByTagName('v')[0]?.textContent||cell.getElementsByTagName('is')[0]?.textContent||'';result[idx]=cell.getAttribute('t')==='s'?strings[Number(value)]||'':value}return result.map(v=>v||'')})
-}
-function tableToTraining(rows:string[][]):ExerciseLine[]{
- const groups=new Map<string,SetLine[]>();for(const [idx,row] of rows.entries()){if(idx===0&&row.some(x=>/упражнен|exercise|weight|вес|повтор/i.test(x)))continue;const name=(row[0]||'').trim();if(!name)continue;const weight=Number((row[1]||'0').replace(',','.')),reps=Number(row[2]||8),done=/^(1|true|да|yes|done|✓|x)$/i.test((row[3]||'').trim());if(!Number.isFinite(weight)||!Number.isFinite(reps)||weight<0||reps<0)continue;groups.set(name,[...(groups.get(name)||[]),{...blankSet(),weight,reps,done}])}return Array.from(groups,([name,sets])=>({id:uid(),name,sets}))
-}
-function fromPortableJson(data:unknown):ExerciseLine[]{
- if(!data||typeof data!=='object')throw new Error('Неверная структура JSON');const obj=data as Record<string,unknown>;const candidate=Array.isArray(obj.exercises)?obj.exercises:Array.isArray(obj.rows)?obj.rows:Array.isArray(obj.workouts)?(obj.workouts[0] as Record<string,unknown>)?.exercises:null;
- if(!Array.isArray(candidate))throw new Error('Нет списка exercises/rows в JSON');return candidate.map((raw:unknown)=>{const x=raw as Record<string,unknown>;const name=String(x.name||x.exercise||'').trim();const sets=Array.isArray(x.sets)?x.sets.map((v:unknown)=>{const a=v as Record<string,unknown>;return {...blankSet(),weight:Number(a.weight||0),reps:Number(a.reps||0),done:a.done===true||a.completed===true}}):[];if(!name||!sets.length||sets.some(s=>!Number.isFinite(s.weight)||!Number.isFinite(s.reps)||s.weight<0||s.reps<0))throw new Error('Ошибочный подход в импортируемом JSON');return {id:uid(),name,sets}})
+ return <AnatomyMuscleMap loads={loads} sex={sex}/>
 }
 
 type Tab = 'train' | 'history' | 'progress' | 'calendar' | 'body' | 'muscles'
@@ -288,7 +267,7 @@ export default function App() {
   const [ironlogPreview,setIronlogPreview]=useState<{programs:Program[],workouts:Workout[],measurements:Measurement[],warnings:string[]}|null>(null)
   useEffect(()=>{if(!restUntil)return;const timer=window.setInterval(()=>setClock(Date.now()),1000);return()=>window.clearInterval(timer)},[restUntil])
   const secondsLeft=Math.max(0,Math.ceil((restUntil-clock)/1000))
-  useEffect(()=>{if(editor==='session'&&rows.length){localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId}))}},[editor,rows,name,activeProgramId,editingWorkoutId])
+  useEffect(()=>{if(editor==='session'&&rows.length){localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId,sessionId:localStorage.getItem('osfit-widget-session')||''}))}},[editor,rows,name,activeProgramId,editingWorkoutId])
   // Sync only the widget snapshot. No measurements, goals or full workout history leave this device.
   useEffect(()=>{
     if(busy || !syncUrl || !syncKey || !/^https:\/\//i.test(syncUrl))return
@@ -312,7 +291,7 @@ export default function App() {
   const saveSessionDraft = () => {
     if(editor!=='session') return
     try {
-      localStorage.setItem('osfit-session-draft', JSON.stringify({name,rows,activeProgramId,editingWorkoutId,savedAt:new Date().toISOString()}))
+      localStorage.setItem('osfit-session-draft', JSON.stringify({name,rows,activeProgramId,editingWorkoutId,sessionId:localStorage.getItem('osfit-widget-session')||'',savedAt:new Date().toISOString()}))
       setDraft(true)
       setDirty(false)
       setEditor(null)
@@ -320,13 +299,34 @@ export default function App() {
       tell('Тренировка сохранена. Продолжить можно на главной.')
     } catch (e) { setError('Не удалось сохранить черновик: '+String(e)) }
   }
-  const restoreDraft=()=>{try{const d=JSON.parse(localStorage.getItem('osfit-session-draft')||'null');if(!d||!Array.isArray(d.rows))return;setName(d.name);setRows(d.rows);setActiveProgramId(d.activeProgramId??null);setEditingWorkoutId(d.editingWorkoutId??null);setEditor('session');setDraft(false)}catch{setError('Черновик повреждён')}}
+  const restoreDraft=()=>{try{const d=JSON.parse(localStorage.getItem('osfit-session-draft')||'null');if(!d||!Array.isArray(d.rows))return;localStorage.setItem('osfit-widget-session',d.sessionId||crypto.randomUUID());setName(d.name);setRows(d.rows);setActiveProgramId(d.activeProgramId??null);setEditingWorkoutId(d.editingWorkoutId??null);setEditor('session');setDraft(false)}catch{setError('Черновик повреждён')}}
   const storeProfile=(patch:Partial<Profile>)=>{setProfile(old=>{const p={...old,...patch};saveProfile(p);return p})}
   const addPlanned=async()=>{if(!plannedProgram)return setError('Выберите программу');try{await saveSchedule({id:uid(),date:plannedDate,programId:plannedProgram,repeatDays:repeatDays||undefined});setSchedule(await allSchedule());tell('Тренировка запланирована')}catch(e){setError(String(e))}}
   const removePlanned=async(id:string)=>{await deleteSchedule(id);setSchedule(await allSchedule())}
   const upcoming=(day:string)=>schedule.filter(a=>{const delta=Math.round((Date.parse(day+'T12:00:00')-Date.parse(a.date+'T12:00:00'))/86400000);return delta>=0&&(delta===0||!!a.repeatDays&&delta%a.repeatDays===0)})
 
   useEffect(()=>{setDraft(!!localStorage.getItem('osfit-session-draft'))},[])
+  useEffect(()=>{
+    const action=readWidgetAction(window.location.search)
+    if(!action)return
+    const url=new URL(window.location.href)
+    url.searchParams.delete('osfitWidget');url.searchParams.delete('exercise');url.searchParams.delete('session')
+    window.history.replaceState({},'',url.pathname+url.search+url.hash)
+    try{
+      const stored=JSON.parse(localStorage.getItem('osfit-session-draft')||'null')
+      if(!stored || !Array.isArray(stored.rows) || stored.sessionId!==action.session){
+        setError('Не найдена эта тренировка в локальной базе. Открой OSFIT из ярлыка на главном экране и обнови виджет. Safari и PWA могут хранить данные раздельно.');return
+      }
+      if(!stored.rows.some((r:ExerciseLine)=>r.id===action.id)){setError('Упражнение не найдено в активной тренировке');return}
+      const updated=updateExercise(stored.rows,action.id,action.complete)
+      const next={...stored,rows:updated,savedAt:new Date().toISOString()}
+      localStorage.setItem('osfit-session-draft',JSON.stringify(next))
+      setName(stored.name||'Тренировка');setRows(updated);setActiveProgramId(stored.activeProgramId??null)
+      setEditingWorkoutId(stored.editingWorkoutId??null);setEditor('session');setDraft(true)
+      setNotice(action.complete?'Упражнение отмечено выполненным':'Отметка выполнения снята')
+    }catch{setError('Не удалось применить действие из виджета')}
+  },[])
+
   const createTemplate=async(index:number)=>{try{const tmpl=PLAN_TEMPLATES[index];for(const day of tmpl.days)await saveProgram({id:uid(),name:day.name,createdAt:new Date().toISOString(),exercises:toLines(day.items)});await load();setShowTemplates(false);tell(`Добавлено программ: ${tmpl.days.length}`)}catch(e){setError(String(e))}}
   const savePortable=()=>{if(editor!=='session'||!rows.length)return;const data={format:'osfit-active-session',version:1,name,exercises:rows,savedAt:new Date().toISOString()};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='osfit-active-session.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);tell('Файл текущей тренировки сохранён')}
   const importPortable=async(file:File)=>{try{const extension=file.name.split('.').pop()?.toLowerCase();let exercises:ExerciseLine[]=[];if(extension==='json')exercises=fromPortableJson(JSON.parse(await file.text()));else if(extension==='xlsx')exercises=tableToTraining(await xlsxAsRows(file));else if(extension==='csv'){const text=await file.text();const delim=text.split(/\r?\n/)[0].includes(';')?';':',';exercises=tableToTraining(text.split(/\r?\n/).map(x=>x.split(delim).map(v=>v.trim().replace(/^"|"$/g,''))))}else if(extension==='txt')exercises=parseTrainingText(await file.text()).exercises;else throw new Error('Поддерживаются TXT, JSON, CSV и XLSX');if(!exercises.length)throw new Error('Не найдено распознанных упражнений');if(!window.confirm(`Импортировать ${exercises.length} упражнений? Текущие несохранённые изменения будут заменены.`))return;setName(file.name.replace(/\.[^.]+$/,''));setRows(exercises);setActiveProgramId(null);setEditingWorkoutId(null);setEditor('session');setSettings(false);setTextImport(false);setShowTemplates(false);setDirty(true);setPortableInfo(`Импортировано ${exercises.length} упражнений. Проверьте выполненные подходы.`);tell('Тренировка загружена')}catch(e){setError(e instanceof Error?e.message:String(e))}}
@@ -354,7 +354,7 @@ export default function App() {
   const abandon = () => {
     if (editor === 'session') {
       try {
-        localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId,savedAt:new Date().toISOString()}))
+        localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId,sessionId:localStorage.getItem('osfit-widget-session')||'',savedAt:new Date().toISOString()}))
         setDraft(true)
         setDirty(false)
         setEditor(null)
@@ -380,7 +380,7 @@ export default function App() {
   const beginSession = (p: Program) => {
     if (localStorage.getItem('osfit-session-draft') && !window.confirm('Есть сохранённая незавершённая тренировка. Начать новую вместо неё? Старая будет заменена.')) return
     if (!abandon()) return
-    setName(p.name); setRows(cloneLines(p.exercises));setExpandedRows([]);setUndoRows([])
+    localStorage.setItem('osfit-widget-session',crypto.randomUUID());setName(p.name); setRows(cloneLines(p.exercises));setExpandedRows([]);setUndoRows([])
     setActiveProgramId(p.id); setEditingWorkoutId(null); setEditor('session'); setDirty(false)
   }
   const changeRow = (index: number, fn: (r: ExerciseLine) => ExerciseLine) => {
@@ -446,6 +446,20 @@ export default function App() {
   const removeW = async (id: string) => {
     if (!window.confirm('Удалить запись о тренировке?')) return
     try { await deleteWorkout(id); setDetail(null); await load() } catch (e) { setError(String(e)) }
+  }
+  const sendLocalWidget=()=>{
+    try{
+      const stored=JSON.parse(localStorage.getItem('osfit-session-draft')||'null')
+      const current=editor==='session'&&rows.length?{name,rows,activeProgramId,editingWorkoutId}:stored
+      if(!current || !Array.isArray(current.rows) || !current.rows.length){setError('Сначала начни тренировку — для отметок из виджета нужен активный черновик.');return}
+      let sessionId=localStorage.getItem('osfit-widget-session')||stored?.sessionId
+      if(!sessionId){sessionId=crypto.randomUUID();localStorage.setItem('osfit-widget-session',sessionId)}
+      localStorage.setItem('osfit-session-draft',JSON.stringify({...current,sessionId,savedAt:new Date().toISOString()}))
+      const payload=widgetPayload(current.name,current.rows,sessionId,location.origin+location.pathname)
+      const param=encodeURIComponent(JSON.stringify(payload))
+      if(param.length>15000){setError('Слишком большой план для передачи ссылкой. Уменьши количество упражнений.');return}
+      location.href='scriptable:///run?scriptName=OSFIT%20Local%20Widget&parameter='+param
+    }catch(err){setError('Ошибка подготовки виджета: '+String(err))}
   }
   const exportForScriptable = async () => {
     try {
@@ -552,8 +566,8 @@ export default function App() {
 
   return <div className="app">
     <header className="header">
+      <button title="Настройки и архив" aria-label="Настройки и архив" className="icon-btn osfit-settings-button" onClick={() => { if (!abandon()) return; setTextImport(false); setSettings(true) }}><Settings size={22}/></button>
       <div className="brand"><span className="brand-icon"><Dumbbell size={22}/></span><div><strong>OSFIT</strong><small>ТРЕНИРОВКИ БЕЗ ЛИШНЕГО</small></div></div>
-      <button title="Настройки и архив" className="icon-btn" onClick={() => { if (!abandon()) return; setTextImport(false); setSettings(true) }}><Settings size={22}/></button>
     </header>
     {error && <div className="error" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
     {notice && <div className="toast">{notice}</div>}
@@ -634,6 +648,7 @@ export default function App() {
         <div className="page-heading"><div><p className="eyebrow">{editor === 'program' ? 'КОНСТРУКТОР' : 'АКТИВНАЯ ТРЕНИРОВКА'}</p><h1>{editor === 'program' ? 'Редактор программы' : 'Тренировка'}</h1></div></div>
         <label className="field-label">Название</label>
         <input className="input title-input" value={name} onChange={e => { setName(e.target.value); setDirty(true) }} placeholder="Название"/>
+        {editor === 'session' && <button className="btn primary full" onClick={sendLocalWidget}>↗ Передать тренировку в локальный виджет</button>}
         {editor === 'session' && <button className="btn secondary full" onClick={() => void exportForScriptable()}><Download size={17}/> План для виджета iPhone</button>}
         {editor === 'session' && <><button className="btn secondary full" onClick={savePortable}><Download size={17}/> Экспортировать текущую тренировку</button>{portableInfo&&<p className="osfit-helper">{portableInfo}</p>}</>}
         {editor === 'session' && <div className="card"><div className="exercise-head"><strong>Таймер отдыха</strong><button className="btn secondary compact" onClick={startRest}>Старт {restDuration} с</button></div><strong>{secondsLeft>0?`${Math.floor(secondsLeft/60)}:${String(secondsLeft%60).padStart(2,'0')}`:'Готов'}</strong><button className="tiny-icon" onClick={()=>setRestUntil(0)}>Сброс</button></div>}
@@ -673,6 +688,7 @@ export default function App() {
         <button className="btn danger full" onClick={() => void removeW(detail.id)}><Trash2 size={17}/> Удалить запись</button>
       </section> : tab === 'train' ? <section>
         <div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={() => beginProgram()}><Plus size={17}/> Создать</button></div>
+        {draft&&<button className="btn secondary full" onClick={sendLocalWidget}>↗ Обновить виджет Scriptable</button>}
         {draft&&<button className="btn primary full" onClick={restoreDraft}>Продолжить тренировку с паузы</button>}
         <button className="btn secondary full" onClick={() => setShowTemplates(v=>!v)}><Dumbbell size={17}/> Готовые системы тренировок</button>
         {backupAt&&<p className="osfit-helper">Последняя резервная копия: {new Date(backupAt).toLocaleDateString('ru-RU')}</p>}
@@ -694,12 +710,12 @@ export default function App() {
         <div className="page-heading"><div><p className="eyebrow">РАСПИСАНИЕ</p><h1>Календарь</h1></div></div>
         <div className="card"><strong>Запланировать тренировку</strong><label className="field-label">Дата начала</label><input className="input" type="date" value={plannedDate} onChange={e=>setPlannedDate(e.target.value)}/><label className="field-label">Программа</label><select className="input" value={plannedProgram} onChange={e=>setPlannedProgram(e.target.value)}><option value="">Выбрать программу</option>{programs.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><label className="field-label">Повторять</label><select className="input" value={repeatDays} onChange={e=>setRepeatDays(Number(e.target.value))}><option value={0}>Однократно</option><option value={2}>Каждые 2 дня</option><option value={3}>Каждые 3 дня</option><option value={7}>Раз в неделю</option><option value={14}>Раз в 14 дней</option></select><button className="btn primary full" onClick={()=>void addPlanned()}>Добавить в календарь</button></div>
         <input className="input" type="month" value={calendarMonth} onChange={e=>setCalendarMonth(e.target.value)}/>
-        <div className="calendar-grid">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><strong key={d}>{d}</strong>)}
-        {Array.from({length:(new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5))-1,1).getDay()+6)%7},(_,i)=><span key={'empty'+i}/>)}
+        <div className="calendar-grid" role="grid" aria-label="Календарь тренировок">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><strong className="calendar-weekday" key={d}>{d}</strong>)}
+        {Array.from({length:(new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5))-1,1).getDay()+6)%7},(_,i)=><span className="calendar-empty" aria-hidden="true" key={'empty'+i}/>)}
         {Array.from({length:new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5)),0).getDate()},(_,i)=>{
           const date=`${calendarMonth}-${String(i+1).padStart(2,'0')}`
           const count=workouts.filter(w=>w.date.slice(0,10)===date).length;const scheduled=upcoming(date).length
-          return <button key={date} className={count?'trained':scheduled?'planned':''} onClick={()=>{if(count){setTab('history');tell(`Тренировок за ${date}: ${count}`)}}}>{i+1}{count>0?<small>●</small>:scheduled>0?<small>○</small>:null}</button>
+          return <button type="button" aria-label={`${i+1} число: ${count} завершено, ${scheduled} запланировано`} key={date} className={'calendar-day'+(count?' trained':scheduled?' planned':'')+(date===new Date().toLocaleDateString('en-CA')?' today':'')} onClick={()=>{if(count){setTab('history');tell(`Тренировок за ${date}: ${count}`)}}}>{i+1}{count>0?<small>●</small>:scheduled>0?<small>○</small>:null}</button>
         })}</div>
         <h2 className="section-title">План занятий</h2>{schedule.map(a=><div className="card" key={a.id}><div className="exercise-head"><strong>{a.date} · {programs.find(p=>p.id===a.programId)?.name||'Удалённая программа'}</strong><button className="tiny-icon" onClick={()=>void removePlanned(a.id)}><Trash2 size={17}/></button></div><p className="muted small">{a.repeatDays?`Повтор каждые ${a.repeatDays} дней`:'Однократно'}</p><button className="btn secondary" onClick={()=>{const p=programs.find(p=>p.id===a.programId);if(p)beginSession(p)}}>Начать</button></div>)}
         <h2 className="section-title">Тренировки месяца</h2>

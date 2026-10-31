@@ -1,11 +1,5 @@
 export type SetLine = {id:string, weight:number, reps:number, done:boolean, kind?:'warmup'|'work'|'drop', rpe?:number, rir?:number, tempo?:string, note?:string, rest?:number, superset?:string}
-export type ExerciseLine = {
-  id: string
-  name: string
-  sets: SetLine[]
-  superset?: string
-  note?: string
-}
+export type ExerciseLine = {id:string, name:string, sets:SetLine[], superset?:string, note?:string}
 export type Program = {id:string,name:string,exercises:ExerciseLine[],createdAt:string}
 export type Workout = {id:string,name:string,programId:string|null,date:string,exercises:ExerciseLine[],volume:number}
 export type Measurement = {id:string,date:string,weight?:number,waist?:number,chest?:number,arm?:number,thigh?:number,hips?:number,neck?:number,note?:string}
