@@ -18,6 +18,12 @@ function mapId(id:string):Muscle|null{
   for(const key of keys) if(mapping[key].some(prefix=>id===prefix||id.startsWith(prefix))) return key
   return null
 }
+// Keep calculation precision in memory; round only for display.
+const fmtLoad=(value: number | undefined): string => {
+  const n=Number(value ?? 0)
+  return Number.isFinite(n) ? String(Math.round((n + Number.EPSILON)*10)/10) : '0'
+}
+
 export default function AnatomyMuscleMap({loads,sex}:{loads:Record<Muscle,number>,sex:'male'|'female'}){
   const [side,setSide]=useState<'front'|'back'>('front')
   const [selected,setSelected]=useState<Muscle|null>(null)
@@ -50,8 +56,8 @@ export default function AnatomyMuscleMap({loads,sex}:{loads:Record<Muscle,number
       <button className={side==='back'?'active':''} type="button" onClick={()=>setSide('back')}>Сзади</button>
     </div>
     <div className="osfit-anatomy-viewport" ref={host}/>
-    <p className="osfit-anatomy-hint">{selected?`${names[selected]}: ${loads[selected]||0} подходов`:'Нажми на мышцу для подробностей'}</p>
-    <div className="muscle-legend">{keys.map(key=><button type="button" key={key} className={selected===key?'active':''} onClick={()=>setSelected(x=>x===key?null:key)}><span>{names[key]}</span><b>{loads[key]||0}</b></button>)}</div>
+    <p className="osfit-anatomy-hint">{selected?`${names[selected]}: ${fmtLoad(loads[selected])} усл. подходов`:'Нажми на мышцу для подробностей'}</p>
+    <div className="muscle-legend">{keys.map(key=><button type="button" key={key} className={selected===key?'active':''} onClick={()=>setSelected(x=>x===key?null:key)}><span>{names[key]}</span><b>{fmtLoad(loads[key])}</b></button>)}</div>
     <p className="osfit-anatomy-credit">Анатомическая модель: body-muscles · Apache-2.0. Нагрузка рассчитана по данным OSFIT.</p>
   </div>
 }

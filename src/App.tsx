@@ -136,6 +136,12 @@ body,#root,.app{background:var(--osfit-bg);color:var(--osfit-text)}
 .ios-theme-switch.is-on{background:#0a84ff}.ios-theme-thumb{display:block;width:28px;height:28px;border-radius:50%;background:white;box-shadow:0 2px 5px #0004;transition:transform .18s}.ios-theme-switch.is-on .ios-theme-thumb{transform:translateX(20px)}
 .ios-theme-switch:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 @media(max-width:390px){.calendar-grid{gap:4px!important}.calendar-grid>.calendar-day{border-radius:10px!important;font-size:13px}.muscle-legend button{font-size:11px;padding:8px!important}}
+/* OSFIT 5.6: settings right and clear header spacing */
+.header{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important}
+.header .brand{order:0!important;flex:0 1 auto!important;min-width:0!important}
+.header .osfit-settings-button{order:2!important;margin-left:auto!important;flex:0 0 44px!important}
+.content{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))!important}
+
 `;
 const PLAN_TEMPLATES: {title:string,desc:string,days:{name:string,items:[string,number,number][]}[]}[]=[
 {title:'Фулбади A/B/C',desc:'3 дня · всё тело',days:[{name:'Фулбади A',items:[['Присед со штангой',3,8],['Жим штанги лёжа',3,8],['Тяга штанги в наклоне',3,10],['Планка',3,30]]},{name:'Фулбади B',items:[['Румынская тяга',3,8],['Жим стоя',3,8],['Тяга верхнего блока',3,10],['Выпады',3,10]]},{name:'Фулбади C',items:[['Жим ногами',3,10],['Жим гантелей лёжа',3,10],['Подтягивания',3,8],['Скручивания',3,15]]}]},
@@ -627,7 +633,6 @@ export default function App() {
     {personalRecord && editor === 'session' && <div className="osfit-pr" role="status"><span>🏆 Новый рекорд 1ПМ: <b>{personalRecord.exercise}</b> · {personalRecord.weight} кг × {personalRecord.reps} (≈{fmt(personalRecord.estimated)} кг)</span><button aria-label="Закрыть уведомление" onClick={()=>setPersonalRecord(null)}>×</button></div>}
     {lastSummary && !editor && <div className="osfit-report" role="region" aria-label="Итоги завершённой тренировки"><div className="osfit-report-head"><strong>✓ Тренировка сохранена · {lastSummary.name}</strong><button onClick={()=>setLastSummary(null)} aria-label="Закрыть отчёт">×</button></div><div className="osfit-report-stats"><span>Упражнений <b>{lastSummary.exercises}</b></span><span>Подходов <b>{lastSummary.sets}</b></span><span>Тоннаж <b>{fmt(lastSummary.volume)} кг</b></span><span>Новых 1ПМ <b>{lastSummary.prs.length}</b></span></div>{lastSummary.prs.length>0&&<p>🏆 {lastSummary.prs.join(', ')}</p>}<p className="muted small">Рекорды рассчитаны по формуле Эпли, а не по фактическому максимуму.</p></div>}
     <style>{OSFIT_CSS + `.osfit-pr,.osfit-report{position:relative;margin:12px 16px;padding:14px;border:1px solid #3f7761;border-radius:14px;background:#172820;color:#e5f6ed;z-index:5}.osfit-pr{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-pr button,.osfit-report-head button{border:0;background:transparent;color:inherit;font-size:24px;cursor:pointer}.osfit-report-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-report-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.osfit-report-stats span{display:flex;flex-direction:column;font-size:12px;color:#acc5b8}.osfit-report-stats b{font-size:17px;color:#ecfff3}.osfit-report p{margin:10px 0 0}`}</style><main className="content">
-      {miniDraft&&miniDraft.rows.length>0&&!settings&&!detail&&!textImport&&(editor==='session'||(!editor&&tab==='train'))&&<WorkoutMiniWidget key={miniRevision} name={miniDraft.name} exercises={miniDraft.rows} onToggle={toggleMiniExercise} onOpen={editor==='session'?undefined:restoreDraft} compact={editor==='session'}/>}
 
       {!editor&&!settings&&!detail&&!textImport&&['history','body','muscles'].includes(tab)&&<div className="osfit-view-buttons"><button className={tab==='history'?'active':''} onClick={()=>switchTab('history')}>История</button><button className={tab==='body'?'active':''} onClick={()=>switchTab('body')}>Замеры</button><button className={tab==='muscles'?'active':''} onClick={()=>switchTab('muscles')}>Мышцы</button></div>}
       {busy ? <p>Загрузка данных…</p> : settings ? <section className={compact?'osfit-compact':''}>
@@ -700,8 +705,6 @@ export default function App() {
         <div className="page-heading"><div><p className="eyebrow">{editor === 'program' ? 'КОНСТРУКТОР' : 'АКТИВНАЯ ТРЕНИРОВКА'}</p><h1>{editor === 'program' ? 'Редактор программы' : 'Тренировка'}</h1></div></div>
         <label className="field-label">Название</label>
         <input className="input title-input" value={name} onChange={e => { setName(e.target.value); setDirty(true) }} placeholder="Название"/>
-        {editor === 'session' && <button className="btn primary full" onClick={sendLocalWidget}>↗ Передать тренировку в локальный виджет</button>}
-        {editor === 'session' && <button className="btn secondary full" onClick={() => void exportForScriptable()}><Download size={17}/> План для виджета iPhone</button>}
         {editor === 'session' && <><button className="btn secondary full" onClick={savePortable}><Download size={17}/> Экспортировать текущую тренировку</button>{portableInfo&&<p className="osfit-helper">{portableInfo}</p>}</>}
         {editor === 'session' && <div className="card"><div className="exercise-head"><strong>Таймер отдыха</strong><button className="btn secondary compact" onClick={startRest}>Старт {restDuration} с</button></div><strong>{secondsLeft>0?`${Math.floor(secondsLeft/60)}:${String(secondsLeft%60).padStart(2,'0')}`:'Готов'}</strong><button className="tiny-icon" onClick={()=>setRestUntil(0)}>Сброс</button></div>}
         {editor === 'session' && <div className="osfit-inline-actions"><button onClick={undo} disabled={!undoRows.length}>↶ Отменить действие</button><div className="osfit-segmented" role="group" aria-label="Вид тренировки">{(['simple','compact','expanded'] as const).map(v=><button key={v} className={viewMode===v?'active':''} aria-pressed={viewMode===v} onClick={()=>changeViewMode(v)}>{v==='simple'?'Простой':v==='compact'?'Компактный':'Полный'}</button>)}</div></div>}
@@ -740,7 +743,6 @@ export default function App() {
         <button className="btn danger full" onClick={() => void removeW(detail.id)}><Trash2 size={17}/> Удалить запись</button>
       </section> : tab === 'train' ? <section>
         <div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={() => beginProgram()}><Plus size={17}/> Создать</button></div>
-        {draft&&<button className="btn secondary full" onClick={sendLocalWidget}>↗ Обновить виджет Scriptable</button>}
         {draft&&<button className="btn primary full" onClick={restoreDraft}>Продолжить тренировку с паузы</button>}
         <button className="btn secondary full" onClick={() => setShowTemplates(v=>!v)}><Dumbbell size={17}/> Готовые системы тренировок</button>
         {backupAt&&<p className="osfit-helper">Последняя резервная копия: {new Date(backupAt).toLocaleDateString('ru-RU')}</p>}
