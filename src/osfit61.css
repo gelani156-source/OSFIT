@@ -1,0 +1,13 @@
+
+/* OSFIT 6.1 – light theme contrast and consistent controls */
+:root[data-theme="light"] .brand,:root[data-theme="light"] .brand strong,:root[data-theme="light"] .brand small,:root[data-theme="light"] h1,:root[data-theme="light"] h2,:root[data-theme="light"] h3,:root[data-theme="light"] .exercise-head strong,:root[data-theme="light"] .page-heading h1{color:var(--text)!important;opacity:1!important}
+:root[data-theme="light"] .btn.secondary,:root[data-theme="light"] .tiny-icon,:root[data-theme="light"] .osfit-import-choice,:root[data-theme="light"] .history-card,:root[data-theme="light"] .catalog button,:root[data-theme="light"] .exercise-card{background:var(--osfit-button-secondary);color:var(--osfit-button-text);border-color:var(--border)}
+:root[data-theme="light"] .btn.primary,:root[data-theme="light"] .btn.danger{color:white}
+:root[data-theme="light"] .bottom-nav{background:rgba(248,250,254,.97);border-top-color:var(--border)}
+:root[data-theme="light"] .bottom-nav button:not(.active){color:#64748b}
+:root[data-theme="light"] .input,:root[data-theme="light"] input,:root[data-theme="light"] select,:root[data-theme="light"] textarea{color:var(--text);border-color:var(--border)}
+:root[data-theme="light"] .muted,:root[data-theme="light"] .osfit-anatomy-hint,:root[data-theme="light"] .osfit-home-intro{color:var(--muted)!important}
+:root[data-theme="light"] .osfit-tools,:root[data-theme="light"] .card{background:var(--surface-secondary);color:var(--text);border-color:var(--border)}
+:root[data-theme="light"] .osfit-legend button{color:var(--text)}
+.osfit-61-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:12px 0}.osfit-61-metric{border:1px solid var(--border);background:var(--surface-secondary);border-radius:12px;padding:12px;color:var(--text)}.osfit-61-metric b{font-size:20px;display:block}.osfit-61-metric small{color:var(--muted)}.osfit-61-select{width:100%;min-height:40px;padding:8px;color:var(--text);background:var(--surface-secondary);border:1px solid var(--border);border-radius:10px}.osfit-61-grip{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.osfit-61-check{display:flex;align-items:center;gap:8px;margin:10px 0}.osfit-61-check input{width:20px;height:20px}.osfit-61-group{margin-top:12px}.osfit-61-group summary{font-weight:650;cursor:pointer;padding:8px 0}.osfit-61-bar{height:7px;background:var(--border);border-radius:9px;overflow:hidden;margin:5px 0 9px}.osfit-61-bar div{height:100%;background:var(--accent);border-radius:9px}
+.osfit-61-muscle-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.osfit-61-muscle-checks .osfit-61-check{font-size:12px;display:flex;margin:4px 0;align-items:center}

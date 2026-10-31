@@ -1,5 +1,6 @@
-:root{--background:#f5f7fa;--text:#17212e;--surface-secondary:#ffffff;--border:#d6dfe8;--separator:#dce4ec;--accent:#087df5;--muted:#64748b;--surface-2:#edf1f6;color-scheme:light}
-:root[data-theme="dark"]{--background:#101214;--text:#eaeef2;--surface-secondary:#1e242a;--border:#37424d;--separator:#35404a;--accent:#0a84ff;--muted:#a4acb5;--surface-2:#22272f;color-scheme:dark}
-:root[data-theme="light"] body{background:var(--background);color:var(--text)}
+/* OSFIT 6.1: explicit palette from first paint. */
+:root,:root[data-theme="dark"]{--background:#101214;--text:#eaeef2;--surface-secondary:#1e242a;--border:#37424d;--separator:#35404a;--accent:#0a84ff;--muted:#a4acb5;--surface-2:#22272f;--osfit-button-secondary:#28323b;--osfit-button-text:#eaeef2;color-scheme:dark;background:var(--background);color:var(--text)}
+:root[data-theme="light"]{--background:#f4f7fb;--text:#17212e;--surface-secondary:#ffffff;--border:#d3dce8;--separator:#d9e2ed;--accent:#087df5;--muted:#596b83;--surface-2:#edf1f6;--osfit-button-secondary:#e8eff8;--osfit-button-text:#17212e;color-scheme:light;background:var(--background);color:var(--text)}
+:root body{background:var(--background);color:var(--text)}
 :root[data-theme="light"] .muted,:root[data-theme="light"] .small.muted{color:var(--muted)}
-:root[data-theme="light"] .osfit-template-list button,:root[data-theme="light"] .osfit-inline-actions button,:root[data-theme="light"] .osfit-group-filters button{background:#eef3f9;color:#17212e;border-color:#d6dfe8}
+:root[data-theme="light"] .osfit-template-list button,:root[data-theme="light"] .osfit-inline-actions button,:root[data-theme="light"] .osfit-group-filters button{background:#e8eff8;color:#17212e;border-color:#d3dce8}

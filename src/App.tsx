@@ -1,5 +1,8 @@
 import './homePolish.css'
+import './osfit61.css'
 import AnatomyMuscleMap from './AnatomyMuscleMap'
+import {muscleKeys,muscleGroupNames,workoutLoadStats,lastTrained,loadStats} from './MuscleMap'
+import type {ExtendedExercise,Muscle as MuscleKey,Grip} from './MuscleMap'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {ThemeToggle} from './ThemeToggle'
 import {muscleLoad,exerciseMuscleLoad} from './MuscleMap'
@@ -156,6 +159,30 @@ const toLines=(items:[string,number,number][]):ExerciseLine[]=>items.map(([name,
 
 // Anatomical SVG map is rendered by the maintained body-muscles library.
 // The exercise statistics still come exclusively from OSFIT's own MuscleMap.ts.
+function MuscleAudit({workouts,period}:{workouts:Workout[],period:number}){
+ const todayDate=new Date();todayDate.setHours(12,0,0,0)
+ const ws=workouts.filter(w=>{const d=new Date(w.date.slice(0,10)+'T12:00:00');return Number.isFinite(+d)&&+d>=+todayDate-(period-1)*86400000&&+d<=+todayDate})
+ const stats=workoutLoadStats(ws)
+ const totalDirect=Object.values(stats.direct).reduce((a,b)=>a+b,0)
+ const ranked=muscleKeys.map(k=>({key:k,value:stats.direct[k]+stats.indirect[k]})).sort((a,b)=>b.value-a.value)
+ const peak=Math.max(1,...ranked.map(x=>x.value))
+ return <section className="card">
+   <h3>Баланс мышечной нагрузки · {period} дней</h3>
+   <div className="osfit-61-metrics">
+     <div className="osfit-61-metric"><b>{stats.work}</b><small>Рабочих подходов</small></div>
+     <div className="osfit-61-metric"><b>{stats.warmup}</b><small>Разминочных</small></div>
+     <div className="osfit-61-metric"><b>{stats.unclassified}</b><small>Не распределены</small></div>
+     <div className="osfit-61-metric"><b>{stats.legacy}</b><small>Оценены из старых записей</small></div>
+   </div>
+   <p className="small muted">Прямые и косвенные подходы показаны отдельно. Косвенные — условная оценка участия, а не точная нагрузка.</p>
+   {ranked.map(x=><div key={x.key} style={{marginBottom:10}}>
+    <div className="exercise-head"><strong>{muscleGroupNames[x.key]}</strong><span>{stats.direct[x.key].toFixed(1)} прямых + {stats.indirect[x.key].toFixed(1)} косвенных</span></div>
+    <div className="osfit-61-bar"><div style={{width:`${x.value/peak*100}%`}}/></div>
+    <small className="muted">Последняя нагрузка: {lastTrained(workouts,x.key)||'нет записей'}</small>
+   </div>)}
+   <p className="small muted">Сравнивай объём между неделями и своими упражнениями. Равный объём всех групп не обязателен. Дата нагрузки не означает, что мышца восстановилась.</p>
+ </section>
+}
 function MuscleMap({loads,sex='male'}:{loads:Record<Muscle,number>,sex?:'male'|'female'}){
  return <AnatomyMuscleMap loads={loads} sex={sex}/>
 }
@@ -617,6 +644,19 @@ export default function App() {
           {viewMode==='simple' && editor==='session' && !finished && <div className="osfit-simple"><div className="osfit-simple-plan">{r.sets.length?`${exerciseMode(r.name)==='bodyweight'?'Без веса':(r.sets.find(s=>!s.done)?.weight??r.sets[0].weight)+' '+(exerciseMode(r.name)==='plates'?'плиток (по 5 кг)':'кг')} × ${r.sets.find(s=>!s.done)?.reps??r.sets[0].reps} · ${r.sets.length} подходов`:'Нет подходов'}</div><div className="osfit-progress-track"><div style={{width:`${r.sets.length?100*r.sets.filter(s=>s.done).length/r.sets.length:0}%`}}/></div><button className="btn primary full" disabled={!r.sets.some(s=>!s.done)} onClick={()=>{const j=r.sets.findIndex(s=>!s.done);if(j>=0)changeSet(i,j,{done:true})}}>✓ Выполнить следующий подход</button>{r.sets.some(s=>s.done)&&<button className="osfit-simple-undo" onClick={()=>{const j=r.sets.map(s=>s.done).lastIndexOf(true);if(j>=0)changeSet(i,j,{done:false})}}>↶ Отменить подход</button>}</div>}
           {!collapsed&&<><div className="osfit-inline-actions"><button onClick={()=>changeExercise(i)}>Заменить упражнение</button><button onClick={()=>setExtrasRows(v=>v.includes(r.id)?v.filter(x=>x!==r.id):[...v,r.id])}>RPE / RIR / темп</button></div>
           <div className="exercise-options" style={{display:viewMode==='compact'&&!extrasRows.includes(r.id)?'none':undefined}}><label>Суперсет <input className="input" placeholder="A, B..." value={r.superset||''} onChange={e=>changeRow(i,x=>({...x,superset:e.target.value}))}/></label><label>Заметка <input className="input" placeholder="Техника" value={r.note||''} onChange={e=>changeRow(i,x=>({...x,note:e.target.value}))}/></label></div>
+          {<details className="osfit-61-group"><summary>Мышцы и хват · настройки упражнения</summary>
+    <label className="field-label">Основная мышца
+      <select className="osfit-61-select" value={(r as ExtendedExercise).musclePrimary||'auto'} onChange={e=>changeRow(i,x=>({...x,musclePrimary:e.target.value}))}>
+       <option value="auto">Определять автоматически</option>
+       {muscleKeys.map(k=><option value={k} key={k}>{muscleGroupNames[k]}</option>)}
+      </select></label>
+    {(r as ExtendedExercise).musclePrimary&&((r as ExtendedExercise).musclePrimary!=='auto')&&<div className="osfit-61-group"><strong>Косвенные мышцы</strong>
+      <div className="osfit-61-muscle-checks">{muscleKeys.filter(k=>k!==(r as ExtendedExercise).musclePrimary).map(k=><label key={k} className="osfit-61-check"><input type="checkbox" checked={((r as ExtendedExercise).muscleSecondary||[]).includes(k)} onChange={e=>changeRow(i,x=>({...x,muscleSecondary:e.target.checked?[...((x as ExtendedExercise).muscleSecondary||[]),k]:((x as ExtendedExercise).muscleSecondary||[]).filter(v=>v!==k)}))}/>{muscleGroupNames[k]}</label>)}</div></div>}
+    <div className="osfit-61-grip"><label>Хват<select className="osfit-61-select" value={(r as ExtendedExercise).grip||'standard'} onChange={e=>changeRow(i,x=>({...x,grip:e.target.value as Grip}))}>
+      <option value="standard">Обычный</option><option value="pronated">Прямой</option><option value="supinated">Обратный</option><option value="neutral">Нейтральный</option><option value="mixed">Разнохват</option><option value="wide">Широкий</option><option value="narrow">Узкий</option>
+    </select></label><label className="osfit-61-check"><input type="checkbox" checked={Boolean((r as ExtendedExercise).straps)} onChange={e=>changeRow(i,x=>({...x,straps:e.target.checked}))}/>Лямки</label></div>
+    <p className="muted small">Хват и лямки — ориентировочные поправки для косвенной нагрузки предплечий, не измерение активации мышцы.</p>
+    </details>}
           <div className="set-headers"><span>Подход</span><span>{exerciseMode(r.name)==='plates'?'Плитки × 5 кг':exerciseMode(r.name)==='optional'?'Доп. вес, кг':exerciseMode(r.name)==='bodyweight'?'Без веса':'Вес, кг'}</span><span>Повторы</span><span>{editor === 'session' ? 'Готово' : 'План'}</span></div>
           {r.sets.map((s, j) => <div className="set-row" key={s.id}>
             <span className="set-index">{j + 1}</span>
@@ -635,7 +675,7 @@ export default function App() {
           <div className="osfit-group-filters">{groups.map(g=><button key={g} className={groupFilter===g?'active':''} onClick={()=>setGroupFilter(g)}>{g}</button>)}</div><div className="catalog osfit-pick-list">{(query.trim() ? Array.from(new Set([query.trim(), ...exerciseCatalog.filter(x => x.toLowerCase().includes(query.trim().toLowerCase()))])) : [...new Set([...exerciseCatalog,...suggestions(groupFilter)])]).filter(x=>groupFilter==='Все'||groupFor(x)===groupFilter||x===query.trim()).slice(0, 80).map(x => <button key={x} onClick={() => addExercise(x)}>{x}<Plus size={15}/></button>)}</div>
         </div> : <button className="btn secondary full" onClick={() => setPicker(true)}><Plus size={18}/> Добавить упражнение</button>}
         <button className="btn primary full save-btn" onClick={() => void saveCurrent()}><Save size={18}/>{editor === 'program' ? 'Сохранить программу' : 'Завершить и сохранить'}</button>
-        {editor === 'session' && <p className="small muted center">В подсчёт результатов попадают только выполненные подходы. Старые импортированные подходы без отметок не считаются выполненными автоматически.</p>}
+        {editor === 'session' && <p className="small muted center">В подсчёт результатов попадают только выполненные подходы. В старой истории подходы без отметок учитываются отдельно как оценочные, а в новой тренировке — только реально выполненные.</p>}
       </section> : detail ? <section>
         <button className="back" onClick={() => setDetail(null)}><ChevronLeft size={18}/> История</button>
         <p className="eyebrow">{formatDate(detail.date)}</p><h1>{detail.name}</h1>
@@ -696,6 +736,7 @@ export default function App() {
         <div className="osfit-period-pills" role="group" aria-label="Период подсветки мышц">{[7,30,90,365].map(n=><button type="button" aria-pressed={musclePeriod===n} className={musclePeriod===n?'selected':''} key={n} onClick={()=>{setMusclePeriod(n);localStorage.setItem('osfit-muscle-period',String(n))}}>{n===7?'7 дней':n===30?'30 дней':n===90?'90 дней':'365 дней'}</button>)}</div>
         <p className="muted small">Период — календарные дни, включая сегодня. Нагрузка за {musclePeriod} дней · {workouts.filter(w=>{const t=Date.parse(w.date.slice(0,10)+'T12:00:00');return Number.isFinite(t)&&t>=new Date(localDay()+'T12:00:00').getTime()-(musclePeriod-1)*86400000&&t<=Date.now()+86400000}).length} тренировок. Кнопки 7/30/90/365 меняют именно календарный диапазон, а не число тренировок.</p>
         <MuscleMap key={'period-'+musclePeriod} sex={profile.sex} loads={muscleLoad(workouts.filter(w=>{const t=Date.parse(w.date.slice(0,10)+'T12:00:00');return Number.isFinite(t)&&t>=new Date(localDay()+'T12:00:00').getTime()-(musclePeriod-1)*86400000&&t<=Date.now()+86400000}))}/>
+        <MuscleAudit workouts={workouts} period={musclePeriod}/>
         <h2>Мышцы текущей тренировки</h2><MuscleMap sex={profile.sex} loads={activeMuscles}/>
       </section> : <section>
         <div className="page-heading"><div><p className="eyebrow">СТАТИСТИКА</p><h1>Прогресс</h1></div></div>

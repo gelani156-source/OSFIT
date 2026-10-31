@@ -6,17 +6,17 @@ import './anatomyBright.css'
 const labels:Record<Muscle,string>={
   chest:'Грудные',frontDelts:'Передняя дельта',sideDelts:'Средняя дельта',
   rearDelts:'Задняя дельта',biceps:'Бицепс',triceps:'Трицепс',
-  abs:'Пресс',back:'Спина',traps:'Трапеции',glutes:'Ягодичные',
-  quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'
+  abs:'Пресс',obliques:'Косые мышцы',back:'Спина',spinalErectors:'Разгибатели спины',traps:'Трапеции',forearms:'Предплечья',glutes:'Ягодичные',
+  quads:'Квадрицепсы',adductors:'Приводящие бедра',hamstrings:'Задняя поверхность бедра',calves:'Икры'
 }
 const keys=Object.keys(labels) as Muscle[]
 const groups:Record<string,Muscle[]>={
   chest:['chest'],
   shoulders:['frontDelts','sideDelts','rearDelts'],
   biceps:['biceps'],triceps:['triceps'],
-  abs:['abs'],obliques:['abs'],
+  abs:['abs'],obliques:['obliques'],
   upper_back:['traps','rearDelts'],
-  lats:['back'],lower_back:['back'],
+  lats:['back'],lower_back:['spinalErectors'],
   glutes:['glutes'],quads:['quads'],
   hamstrings:['hamstrings'],calves:['calves']
 }
@@ -65,6 +65,7 @@ export default function AnatomyMuscleMap({loads,sex}:{loads:Record<Muscle,number
     <span>{labels[key]}</span><b>{fmt(loads[key])}</b>
    </button>)}
   </div>
+  <p className="osfit-anatomy-hint">Предплечья и приводящие отображаются в списке, если анатомическая SVG-модель не выделяет их отдельно.</p>
   <p className="osfit-anatomy-credit">Модель: js-rich-body-highlighter · MIT. Интенсивность основана на данных OSFIT.</p>
  </div>
 }
