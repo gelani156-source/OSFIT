@@ -513,6 +513,20 @@ export default function App() {
   const recommendedWeight=(exercise:string)=>{for(const w of workouts){const line=w.exercises.find(e=>e.name.toLowerCase()===exercise.toLowerCase());if(!line)continue;const done=line.sets.filter(s=>s.done&&s.weight>0);if(!done.length)continue;const top=Math.max(...done.map(s=>s.weight));return Math.round((top+(done.every(s=>s.reps>=8)?profile.weightStep:0))/profile.weightStep)*profile.weightStep}return null}
   const handleIronlog=async(f:File)=>{setIronlogFile(f);setIronlogPreview(null);try{const raw=JSON.parse(await f.text()) as unknown;const result=convertIronlog(raw);setIronlogPreview(result)}catch(e){setError(e instanceof Error?e.message:String(e))}}
   const applyIronlog=async()=>{if(!ironlogPreview||!ironlogFile)return;try{if(!window.confirm(`Добавить ${ironlogPreview.workouts.length} тренировок и ${ironlogPreview.programs.length} программ? Существующие записи останутся.`))return;for(const p of ironlogPreview.programs)await saveProgram(p);for(const w of ironlogPreview.workouts)await saveWorkout(w);for(const m of ironlogPreview.measurements)await saveMeasurement(m);await load();setIronlogPreview(null);setIronlogFile(null);tell('Данные IRONLOG добавлены')}catch(e){setError(String(e))}}
+  const sortedRows=editor==='session'?[...rows.filter(r=>!r.sets.length||r.sets.some(s=>!s.done)),...rows.filter(r=>r.sets.length>0&&r.sets.every(s=>s.done))]:rows
+  const undo=()=>{const prev=undoRows.at(-1);if(!prev)return;setRows(prev);setUndoRows(x=>x.slice(0,-1));setDirty(true)}
+  const toggleRow=(id:string)=>setExpandedRows(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id])
+  const changeExercise=(index:number)=>{const old=rows[index];const options=getExerciseAlternative(old.name);const text=window.prompt('Выбери замену:\n'+options.map((x,i)=>`${i+1}. ${x}`).join('\n')+'\nВведите номер', '1');if(!text)return;const n=Number(text);if(!Number.isInteger(n)||n<1||n>options.length)return;changeRow(index,r=>({...r,name:options[n-1]}))}
+  const previous=(exercise:string)=>{for(const w of workouts)for(const e of w.exercises)if(e.name.toLowerCase()===exercise.toLowerCase()){const a=e.sets.find(s=>s.done);if(a)return `${a.weight} кг × ${a.reps}`}return 'Нет выполненных подходов'}
+  const exportProgram=(p:Program)=>{const blob=new Blob([serializeProgram(p)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='osfit-program.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+  const importSharedProgram=async(file:File)=>{try{const p=await readProgramFile(file);await saveProgram({...p,id:uid(),createdAt:new Date().toISOString()});await load();tell('Программа импортирована')}catch(e){setError(String(e))}}
+  const doneCount = rows.reduce((n, r) => n + r.sets.filter(s => s.done).length, 0)
+  const setCount = rows.reduce((n, r) => n + r.sets.length, 0)
+  const stats = {
+    sessions: workouts.length,
+    volume: workouts.reduce((n, w) => n + volumeOf(w.exercises), 0),
+    sets: workouts.reduce((n, w) => n + w.exercises.reduce((v, r) => v + r.sets.filter(s => s.done).length, 0), 0)
+  }
   const best = new Map<string, number>()
   for (const w of workouts) for (const r of w.exercises) for (const s of r.sets) {
     if (s.done) best.set(r.name, Math.max(best.get(r.name) ?? 0, estimate1RM(s.weight, s.reps)))
@@ -621,7 +635,7 @@ export default function App() {
           <div className="osfit-group-filters">{groups.map(g=><button key={g} className={groupFilter===g?'active':''} onClick={()=>setGroupFilter(g)}>{g}</button>)}</div><div className="catalog osfit-pick-list">{(query.trim() ? Array.from(new Set([query.trim(), ...exerciseCatalog.filter(x => x.toLowerCase().includes(query.trim().toLowerCase()))])) : [...new Set([...exerciseCatalog,...suggestions(groupFilter)])]).filter(x=>groupFilter==='Все'||groupFor(x)===groupFilter||x===query.trim()).slice(0, 80).map(x => <button key={x} onClick={() => addExercise(x)}>{x}<Plus size={15}/></button>)}</div>
         </div> : <button className="btn secondary full" onClick={() => setPicker(true)}><Plus size={18}/> Добавить упражнение</button>}
         <button className="btn primary full save-btn" onClick={() => void saveCurrent()}><Save size={18}/>{editor === 'program' ? 'Сохранить программу' : 'Завершить и сохранить'}</button>
-        {editor === 'session' && <p className="small muted center">В подсчёт результатов попадают только выполненные подходы. Для старых импортированных записей без отметок учитываются подходы с указанными повторениями.</p>}
+        {editor === 'session' && <p className="small muted center">В подсчёт результатов попадают только выполненные подходы. Старые импортированные подходы без отметок не считаются выполненными автоматически.</p>}
       </section> : detail ? <section>
         <button className="back" onClick={() => setDetail(null)}><ChevronLeft size={18}/> История</button>
         <p className="eyebrow">{formatDate(detail.date)}</p><h1>{detail.name}</h1>
