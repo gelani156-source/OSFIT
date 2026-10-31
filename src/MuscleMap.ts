@@ -2,7 +2,7 @@ import type {Workout,ExerciseLine} from './model'
 export type Muscle='chest'|'frontDelts'|'sideDelts'|'rearDelts'|'biceps'|'triceps'|'abs'|'back'|'traps'|'glutes'|'quads'|'hamstrings'|'calves'
 export const muscleGroupNames:Record<Muscle,string>={chest:'Грудь',frontDelts:'Передняя дельта',sideDelts:'Средняя дельта',rearDelts:'Задняя дельта',biceps:'Бицепс',triceps:'Трицепс',abs:'Пресс',back:'Спина',traps:'Трапеции',glutes:'Ягодицы',quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'}
 export const muscleKeys=Object.keys(muscleGroupNames) as Muscle[]
-export type ExerciseMuscles={primary:Muscle,secondary:Muscle[]}
+export type ExerciseMuscles={primary:Muscle|'unknown',secondary:Muscle[]}
 /** One classifier for chart, summary, exercise picker, and imported short names. */
 export function classifyExercise(value:string):ExerciseMuscles{
  const n=value.toLowerCase().replace(/ё/g,'е').replace(/\s+/g,' ').trim()
@@ -24,10 +24,11 @@ export function classifyExercise(value:string):ExerciseMuscles{
  if(r(/жим|груд|сведени|бабочк|pec deck|bench|chest|отжиман|брусь|разводка|crossover/))return {primary:'chest',secondary:['frontDelts','triceps']}
  if(r(/дельт|плеч/))return {primary:'sideDelts',secondary:[]}
  // Unknown names are not silently assigned to abs/chest.
- return {primary:'back',secondary:[]}
+ return {primary:'unknown',secondary:[]}
 }
 export function exercisePrimaryGroup(name:string):string{
  const k=classifyExercise(name).primary
+ if(k==='unknown')return 'Прочее'
  if(k==='chest')return 'Грудь'
  if(['back','traps'].includes(k))return 'Спина'
  if(['quads','hamstrings','glutes','calves'].includes(k))return 'Ноги'
@@ -38,7 +39,7 @@ export function exercisePrimaryGroup(name:string):string{
 export function exerciseMuscleLoad(rows:ExerciseLine[],includeSecondary=true):Record<Muscle,number>{
  const total=Object.fromEntries(muscleKeys.map(k=>[k,0])) as Record<Muscle,number>
  for(const e of rows){const count=e.sets.filter(s=>s.done&&s.reps>0).length;if(!count)continue
-  const cls=classifyExercise(e.name);total[cls.primary]+=count
+  const cls=classifyExercise(e.name);if(cls.primary==='unknown')continue;total[cls.primary]+=count
   if(includeSecondary)for(const k of cls.secondary)total[k]+=count*.35
  }
  return total
@@ -50,8 +51,7 @@ export function muscleLoad(ws:Workout[]):Record<Muscle,number>{
  const total=Object.fromEntries(muscleKeys.map(k=>[k,0])) as Record<Muscle,number>
  for(const w of ws){
   // A stored historical workout may not have completion flags from legacy imports.
-  const allUndone=w.exercises.every(e=>e.sets.every(s=>!s.done))
-  const rows=allUndone?w.exercises.map(e=>({...e,sets:e.sets.map(s=>({...s,done:s.reps>0}))})):w.exercises
+  const rows=w.exercises
   const part=exerciseMuscleLoad(rows)
   for(const k of muscleKeys)total[k]+=part[k]
  }

@@ -50,9 +50,31 @@ export const saveMeasurement=(x:Measurement)=>store<IDBValidKey>('measurements',
 export const deleteProgram=(id:string)=>store<undefined>('programs','readwrite',s=>s.delete(id))
 export const deleteWorkout=(id:string)=>store<undefined>('workouts','readwrite',s=>s.delete(id))
 export const deleteMeasurement=(id:string)=>store<undefined>('measurements','readwrite',s=>s.delete(id))
-function valid(x:unknown):x is Backup{if(!x||typeof x!=='object')return false;const b=x as Partial<Backup>;return b.format==='osfit-backup'&&(b.version===1||b.version===2||b.version===3||b.version===4)&&Array.isArray(b.programs)&&Array.isArray(b.workouts)&&(!b.measurements||Array.isArray(b.measurements))&&b.programs.every(p=>typeof p?.id==='string'&&Array.isArray(p?.exercises))&&b.workouts.every(w=>typeof w?.id==='string'&&Array.isArray(w?.exercises))}
+function valid(x:unknown):x is Backup{
+ if(!x||typeof x!=='object')return false
+ const b=x as Partial<Backup>
+ if(b.format!=='osfit-backup'||![1,2,3,4].includes(Number(b.version)))return false
+ if(!Array.isArray(b.programs)||!Array.isArray(b.workouts))return false
+ if(b.measurements!==undefined&&!Array.isArray(b.measurements))return false
+ if(b.schedule!==undefined&&!Array.isArray(b.schedule))return false
+ const ids=(xs:unknown[])=>xs.every(item=>typeof item==='object'&&item!==null&&typeof (item as {id?:unknown}).id==='string'&&!!(item as {id:string}).id)
+ const sets=(e:unknown)=>Array.isArray(e)&&e.every(line=>{
+  if(!line||typeof line!=='object')return false
+  const it=line as {id?:unknown,name?:unknown,sets?:unknown}
+  return typeof it.id==='string'&&typeof it.name==='string'&&Array.isArray(it.sets)&&it.sets.every(set=>{
+   if(!set||typeof set!=='object')return false
+   const s=set as {id?:unknown,weight?:unknown,reps?:unknown,done?:unknown}
+   return typeof s.id==='string'&&typeof s.weight==='number'&&Number.isFinite(s.weight)&&typeof s.reps==='number'&&Number.isFinite(s.reps)&&(s.done===undefined||typeof s.done==='boolean')
+  })
+ })
+ return ids(b.programs)&&ids(b.workouts)&&
+  b.programs.every(p=>typeof p.name==='string'&&sets(p.exercises))&&
+  b.workouts.every(w=>typeof w.name==='string'&&typeof w.date==='string'&&sets(w.exercises))&&
+  ids(b.measurements??[])&&ids(b.schedule??[])
+}
 export async function importBackup(x:unknown){
  if(!valid(x))throw new Error('Неподдерживаемый архив OSFIT')
+ if(!Array.isArray(x.measurements)||!Array.isArray(x.schedule))throw new Error('Неполный архив: отсутствуют замеры или расписание. Импорт отменён для защиты данных')
  const db=await database()
  await new Promise<void>((resolve,reject)=>{
   const tx=db.transaction([...stores],'readwrite')
