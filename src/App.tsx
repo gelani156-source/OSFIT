@@ -1,10 +1,6 @@
-import './homePolish.css'
-import './osfit61.css'
-import AnatomyMuscleMap from './AnatomyMuscleMap'
-import {muscleKeys,muscleGroupNames,workoutLoadStats,lastTrained,loadStats} from './MuscleMap'
-import type {ExtendedExercise,Muscle as MuscleKey,Grip} from './MuscleMap'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {ThemeToggle} from './ThemeToggle'
+import WorkoutMiniWidget from './WorkoutMiniWidget'
 import {muscleLoad,exerciseMuscleLoad} from './MuscleMap'
 import type {Muscle} from './MuscleMap'
 import {groups, groupFor, suggestions, serializeProgram, readProgramFile, getExerciseAlternative, weeklyMuscleSets, bodyPartPrompt} from './smart'
@@ -19,63 +15,10 @@ import {
   deleteWorkout, importBackup, exportBackup, allSchedule, saveSchedule, deleteSchedule, getProfile, saveProfile, saveMeasurement, deleteMeasurement
 } from './db'
 import {
-  blankSet, cloneLines, estimate1RM, exerciseCatalog, uid, volumeOf, exerciseMode, normalizedExerciseName,
+  blankSet, cloneLines, estimate1RM, exerciseCatalog, uid, volumeOf,
   type Program, type Workout, type ExerciseLine, type SetLine, type Schedule, type Profile, type Measurement
 } from './model'
 
-
-// Restore portable JSON/CSV/XLSX imports (OSFIT 5.5 hotfix).
-function fromPortableJson(raw: unknown): ExerciseLine[] {
-  if (!raw || typeof raw !== 'object') throw new Error('Неверный JSON тренировки')
-  const obj = raw as Record<string, unknown>
-  const source = Array.isArray(obj.exercises) ? obj.exercises : Array.isArray(obj.rows) ? obj.rows : null
-  if (!source) throw new Error('JSON должен содержать exercises или rows')
-  return source.map((entry: unknown): ExerciseLine => {
-    const e = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>
-    const name = normalizedExerciseName(String(e.name || e.exercise || 'Упражнение'))
-    const sourceSets = Array.isArray(e.sets) ? e.sets : []
-    const sets: SetLine[] = sourceSets.map((entry: unknown): SetLine => {
-      const t = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>
-      return { ...blankSet(), weight: Math.max(0,Number(t.weight)||0), reps: Math.max(0,Number(t.reps)||0), done: t.done === true, ...(typeof t.kind==='string' && ['warmup','work','drop'].includes(t.kind) ? {kind:t.kind as SetLine['kind']} : {}), ...(typeof t.tempo==='string'?{tempo:t.tempo}:{}), ...(typeof t.note==='string'?{note:t.note}:{}) }
-    })
-    return { id:uid(), name, sets, ...(typeof e.note==='string'?{note:e.note}:{}), ...(typeof e.superset==='string'?{superset:e.superset}:{}) }
-  })
-}
-
-function tableToTraining(rows: unknown[][]): ExerciseLine[] {
-  const cleaned = rows.map(r=>r.map(v=>String(v??'').trim())).filter(r=>r.some(Boolean))
-  if(!cleaned.length) return []
-  const first=cleaned[0].map(x=>x.toLocaleLowerCase('ru').replace(/\s+/g,' '))
-  const index=(words:string[])=>first.findIndex(c=>words.some(w=>c===w||c.includes(w)))
-  const nameCol=index(['упражнен','exercise','название'])
-  const weightCol=index(['вес','weight','кг','плитк'])
-  const repsCol=index(['повтор','reps','повт'])
-  const setsCol=index(['подход','sets','сет'])
-  const doneCol=index(['выполн','done','готов'])
-  const header=nameCol>=0 && (weightCol>=0||repsCol>=0||setsCol>=0)
-  const nc=header?nameCol:0, wc=header?weightCol:1, rc=header?repsCol:2, sc=header?setsCol:3
-  const result:ExerciseLine[]=[]
-  const parseNum=(v:string)=>Number(v.replace(/\s/g,'').replace(',','.'))
-  for(const row of cleaned.slice(header?1:0)){
-    const name=normalizedExerciseName(row[nc]||'')
-    if(!name) continue
-    const weight=wc>=0 && Number.isFinite(parseNum(row[wc]||''))?Math.max(0,parseNum(row[wc])):0
-    const reps=rc>=0 && Number.isFinite(parseNum(row[rc]||''))?Math.max(0,parseNum(row[rc])):0
-    const count=sc>=0 && Number.isFinite(parseNum(row[sc]||''))?Math.min(30,Math.max(1,Math.trunc(parseNum(row[sc])))):1
-    const isDone=doneCol>=0 && /^(да|true|1|yes|✓|готово)$/i.test(row[doneCol]||'')
-    let exercise=result.find(x=>x.name===name)
-    if(!exercise){exercise={id:uid(),name,sets:[]};result.push(exercise)}
-    for(let i=0;i<count;i++)exercise.sets.push({...blankSet(),weight,reps,done:isDone})
-  }
-  return result
-}
-
-async function xlsxAsRows(file:File):Promise<unknown[][]> {
-  const readXlsx=(await import('read-excel-file')).default
-  return await readXlsx(file) as unknown[][]
-}
-
-function localDay(d=new Date()){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
 
 // OSFIT unified update — templates, portable sessions, responsive SVG and compact UI.
 const OSFIT_CSS = `
@@ -105,46 +48,25 @@ const OSFIT_CSS = `
 .osfit-view-buttons button.active{border-color:#0a84ff;color:#0a84ff}
 @media(max-width:390px){.content{padding-inline:14px}.card{padding-inline:14px}.measure-grid{gap:8px}.bottom-nav button span{font-size:10px}}
 
-/* OSFIT 5.4 / unified mobile polish */
-:root{--osfit-bg:var(--background,#101214);--osfit-card:var(--surface-secondary,#1e242a);--osfit-border:var(--border,#37424d);--osfit-text:var(--text,#eaeef2)}
-html{background:var(--osfit-bg);scroll-padding-top:calc(18px + env(safe-area-inset-top,0px))}
-body,#root,.app{background:var(--osfit-bg);color:var(--osfit-text)}
-.app{min-height:100dvh;overflow-x:hidden}
-.header{display:flex;align-items:center;justify-content:flex-start;gap:14px;min-height:64px;padding:calc(12px + env(safe-area-inset-top,0px)) 18px 12px;position:relative;top:auto;background:var(--osfit-bg);border-bottom:1px solid var(--osfit-border)}
-.header .brand{flex:1;min-width:0}.header .osfit-settings-button{order:-1;flex:0 0 44px;width:44px;height:44px;display:grid;place-items:center;border:1px solid var(--osfit-border);border-radius:14px;background:var(--osfit-card);color:var(--osfit-text)}
-.content{padding-top:20px;padding-bottom:calc(100px + env(safe-area-inset-bottom,0px));overflow-wrap:anywhere}
-.page-heading,.content section>h1,.content section>.eyebrow{position:relative;z-index:1}
-.page-heading h1,.content section>h1{line-height:1.12;letter-spacing:-.035em;margin-top:10px}
-.eyebrow{font-size:11px;letter-spacing:.13em;font-weight:750;color:var(--accent)}
-.card{background:var(--osfit-card);border:1px solid var(--osfit-border);border-radius:20px}
-.input,.content input[type=date],.content input[type=month],.content select{min-height:46px;border-radius:13px;border:1px solid var(--osfit-border);background:var(--osfit-card);color:var(--osfit-text)}
-.btn{border-radius:13px}.bottom-nav{background:var(--osfit-bg);border-top:1px solid var(--osfit-border)}
-.calendar-grid{display:grid!important;grid-template-columns:repeat(7,minmax(0,1fr))!important;gap:5px!important;align-items:stretch;width:100%;margin:14px 0 20px}
-.calendar-grid>.calendar-weekday{display:flex;align-items:center;justify-content:center;height:32px;min-width:0;font-size:12px;font-weight:700;color:var(--muted,#9da6b0);letter-spacing:0}
-.calendar-grid>.calendar-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;aspect-ratio:1;min-width:0;min-height:0;width:100%;padding:1px!important;border-radius:12px!important;border:1px solid var(--osfit-border)!important;background:var(--osfit-card)!important;color:var(--osfit-text)!important;font-weight:600;font-size:14px;line-height:1.1;box-shadow:none;transition:border-color .15s ease}
-.calendar-grid>.calendar-day small{font-size:9px;line-height:1;color:var(--accent)}
-.calendar-grid>.calendar-day.today{border:2px solid var(--accent)!important}
-.calendar-grid>.calendar-day.trained{background:color-mix(in srgb,var(--accent) 18%,var(--osfit-card))!important;border-color:var(--accent)!important}
-.calendar-grid>.calendar-day.planned:not(.trained){border-color:#38a6a5!important}
-.calendar-grid>.calendar-day:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.calendar-grid>.calendar-empty{min-width:0}
-.osfit-period-pills{gap:8px}.osfit-period-pills button{min-height:44px;border-radius:13px;font-size:12px}
-.osfit-view-buttons button{border-radius:12px;min-height:42px;background:var(--osfit-card);color:var(--osfit-text);border-color:var(--osfit-border)}
-.osfit-sex-svg{max-width:350px;max-height:500px;filter:drop-shadow(0 8px 22px rgba(0,0,0,.16))}
-.muscle-legend{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px!important;margin:16px 0}
-.muscle-legend button{width:100%;min-width:0;min-height:48px;display:flex!important;gap:7px;align-items:center;justify-content:space-between;text-align:left;border:1px solid var(--osfit-border);border-radius:12px!important;background:var(--osfit-card)!important;color:var(--osfit-text)!important;padding:10px!important;font-size:12px}
-.muscle-legend button span{min-width:0;line-height:1.3;overflow-wrap:anywhere}.muscle-legend button b{font-size:13px;color:var(--accent);font-variant-numeric:tabular-nums}
-.muscle-legend button.active{border-color:var(--accent)}
-.ios-theme-setting{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:54px;color:var(--osfit-text)}
-.ios-theme-switch{flex:0 0 auto;position:relative;width:52px;height:32px;padding:2px;border:0;border-radius:100px;background:#777d84;cursor:pointer;transition:background .18s}
-.ios-theme-switch.is-on{background:#0a84ff}.ios-theme-thumb{display:block;width:28px;height:28px;border-radius:50%;background:white;box-shadow:0 2px 5px #0004;transition:transform .18s}.ios-theme-switch.is-on .ios-theme-thumb{transform:translateX(20px)}
-.ios-theme-switch:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-@media(max-width:390px){.calendar-grid{gap:4px!important}.calendar-grid>.calendar-day{border-radius:10px!important;font-size:13px}.muscle-legend button{font-size:11px;padding:8px!important}}
-/* OSFIT 5.6: settings right and clear header spacing */
-.header{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important}
-.header .brand{order:0!important;flex:0 1 auto!important;min-width:0!important}
-.header .osfit-settings-button{order:2!important;margin-left:auto!important;flex:0 0 44px!important}
-.content{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))!important}
+/* OSFIT 4.8: consistent iOS spacing */
+.measure-grid{column-gap:14px;row-gap:22px;margin-top:18px}
+.measure-grid>label{display:flex;flex-direction:column;gap:10px;line-height:1.4}
+.measure-grid>label .input{margin-top:0!important}
+.osfit-stat-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:4px;margin-bottom:22px}
+.osfit-stat-cards>div{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0;justify-content:space-between}
+.osfit-stat-cards>div small{display:block;margin:0;line-height:1.35}
+.osfit-stat-cards>div b{display:block;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.osfit-empty-chart{border:1px dashed var(--border,#41444d);color:var(--muted,#9299a4);border-radius:14px;padding:22px 14px;font-size:13px;text-align:center;margin:10px 0 18px}
+.osfit-goals-panel>.osfit-goal-card{margin-top:12px}
+.osfit-goals-panel .field-label{display:block;margin-top:16px;margin-bottom:8px}
+.osfit-goals-panel .input{margin-bottom:8px}
+.content .field-label{line-height:1.45}
+.content .input{scroll-margin-bottom:120px}
+.content{padding-bottom:max(30px,env(safe-area-inset-bottom))}
+.app{padding-bottom:calc(100px + env(safe-area-inset-bottom))}
+.bottom-nav{padding-bottom:max(12px,env(safe-area-inset-bottom));z-index:20}
+.muscle-legend button.active{border-color:#0a84ff!important;background:rgba(10,132,255,.16)!important;color:#0a84ff!important}
+@media(max-width:390px){.measure-grid{column-gap:10px;row-gap:18px}.osfit-stat-cards{gap:7px}.osfit-stat-cards>div{padding:12px 9px}}
 
 `;
 const PLAN_TEMPLATES: {title:string,desc:string,days:{name:string,items:[string,number,number][]}[]}[]=[
@@ -157,41 +79,60 @@ const PLAN_TEMPLATES: {title:string,desc:string,days:{name:string,items:[string,
 ];
 const toLines=(items:[string,number,number][]):ExerciseLine[]=>items.map(([name,n,reps])=>({id:uid(),name,sets:Array.from({length:n},()=>({...blankSet(),reps}))}));
 
-// Anatomical SVG map is rendered by the maintained body-muscles library.
-// The exercise statistics still come exclusively from OSFIT's own MuscleMap.ts.
-function MuscleAudit({workouts,period}:{workouts:Workout[],period:number}){
- const todayDate=new Date();todayDate.setHours(12,0,0,0)
- const ws=workouts.filter(w=>{const d=new Date(w.date.slice(0,10)+'T12:00:00');return Number.isFinite(+d)&&+d>=+todayDate-(period-1)*86400000&&+d<=+todayDate})
- const stats=workoutLoadStats(ws)
- const totalDirect=Object.values(stats.direct).reduce((a,b)=>a+b,0)
- const ranked=muscleKeys.map(k=>({key:k,value:stats.direct[k]+stats.indirect[k]})).sort((a,b)=>b.value-a.value)
- const peak=Math.max(1,...ranked.map(x=>x.value))
- return <section className="card">
-   <h3>Баланс мышечной нагрузки · {period} дней</h3>
-   <div className="osfit-61-metrics">
-     <div className="osfit-61-metric"><b>{stats.work}</b><small>Рабочих подходов</small></div>
-     <div className="osfit-61-metric"><b>{stats.warmup}</b><small>Разминочных</small></div>
-     <div className="osfit-61-metric"><b>{stats.unclassified}</b><small>Не распределены</small></div>
-     <div className="osfit-61-metric"><b>{stats.legacy}</b><small>Оценены из старых записей</small></div>
-   </div>
-   <p className="small muted">Прямые и косвенные подходы показаны отдельно. Косвенные — условная оценка участия, а не точная нагрузка.</p>
-   {ranked.map(x=><div key={x.key} style={{marginBottom:10}}>
-    <div className="exercise-head"><strong>{muscleGroupNames[x.key]}</strong><span>{stats.direct[x.key].toFixed(1)} прямых + {stats.indirect[x.key].toFixed(1)} косвенных</span></div>
-    <div className="osfit-61-bar"><div style={{width:`${x.value/peak*100}%`}}/></div>
-    <small className="muted">Последняя нагрузка: {lastTrained(workouts,x.key)||'нет записей'}</small>
-   </div>)}
-   <p className="small muted">Сравнивай объём между неделями и своими упражнениями. Равный объём всех групп не обязателен. Дата нагрузки не означает, что мышца восстановилась.</p>
- </section>
-}
+// Fixed SVG layer mapping: posterior calves are highlighted only on the back.
+// Female and male figures use different shoulder/waist/hip proportions, not merely scaling.
 function MuscleMap({loads,sex='male'}:{loads:Record<Muscle,number>,sex?:'male'|'female'}){
- return <AnatomyMuscleMap loads={loads} sex={sex}/>
+ const [side,setSide]=useState<'front'|'back'>('front');const [selected,setSelected]=useState<Muscle|null>(null)
+ const female=sex==='female';const max=Math.max(1,...Object.values(loads));
+ const basePath=female?'M87 74 Q77 79 70 91 Q64 105 73 128 L82 153 Q83 181 74 207 Q67 225 72 246 Q100 262 128 246 Q133 225 126 207 Q117 181 118 153 L127 128 Q136 105 130 91 Q123 79 113 74Z':'M83 74 Q65 77 59 94 L72 128 76 168 80 209 Q69 225 74 242 L126 242 Q131 225 120 209 L124 168 128 128 141 94 Q135 77 117 74Z';
+ const parts:{id:Muscle,side:'front'|'back'|'both',d:string}[]=[
+ {id:'shoulders',side:'both',d:'M70 87 Q53 91 50 117 L65 130 79 103Z M130 87 Q147 91 150 117 L135 130 121 103Z'},
+ {id:'chest',side:'front',d:'M78 105 Q92 95 98 106 L98 137 73 130Z M122 105 Q108 95 102 106 L102 137 127 130Z'},
+ {id:'forearms',side:'both',d:'M45 173 L57 177 46 207 35 207Z M155 173 L143 177 154 207 165 207Z'},
+ {id:'biceps',side:'front',d:'M53 127 L66 133 59 166 48 164Z M147 127 L134 133 141 166 152 164Z'},
+ {id:'triceps',side:'back',d:'M50 120 L65 130 59 171 46 165Z M150 120 L135 130 141 171 154 165Z'},
+ {id:'abs',side:'front',d:'M84 147 L116 147 115 200 Q100 207 85 200Z'},
+ {id:'traps',side:'back',d:'M83 79 L100 87 117 79 130 107 109 122 100 113 91 122 70 107Z'},
+ {id:'back',side:'back',d:'M73 115 L97 130 97 191 81 204 72 163Z M127 115 L103 130 103 191 119 204 128 163Z'},
+ {id:'glutes',side:'back',d:'M76 213 Q87 207 99 219 L97 246 Q82 251 74 232Z M124 213 Q113 207 101 219 L103 246 Q118 251 126 232Z'},
+ {id:'quads',side:'front',d:'M76 245 L97 250 96 312 83 323 77 281Z M124 245 L103 250 104 312 117 323 123 281Z'},
+ {id:'hamstrings',side:'back',d:'M76 247 L97 252 94 317 81 324 77 284Z M124 247 L103 252 106 317 119 324 123 284Z'},
+ {id:'calves',side:'back',d:'M81 337 Q93 329 97 344 L92 385 Q87 395 81 380Z M119 337 Q107 329 103 344 L108 385 Q113 395 119 380Z'}
+ ];
+ const names:Record<Muscle,string>={chest:'Грудь',shoulders:'Дельты',biceps:'Бицепс',forearms:'Предплечья',triceps:'Трицепс',abs:'Пресс',back:'Спина',traps:'Трапеции',glutes:'Ягодицы',quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'};
+ const all=Object.keys(names) as Muscle[];
+ return <div className="muscle-layout"><div className="osfit-view-buttons"><button className={side==='front'?'active':''} onClick={()=>setSide('front')}>Спереди</button><button className={side==='back'?'active':''} onClick={()=>setSide('back')}>Сзади</button></div>
+ <svg className="osfit-sex-svg" viewBox="0 0 200 440" role="img" aria-label={female?'Женская анатомическая модель':'Мужская анатомическая модель'}>
+ <defs><linearGradient id="osfitFigure" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#344850"/><stop offset="1" stopColor="#17252c"/></linearGradient></defs>
+ <g fill="url(#osfitFigure)" stroke="#536871" strokeWidth="1.5" strokeLinejoin="round"><path d="M82 49 Q74 35 78 21 Q83 7 100 7 Q117 7 122 21 Q126 35 118 49 Q113 61 106 66 L106 76 94 76 94 66 Q87 61 82 49Z"/><path d={basePath}/><path d={female?'M70 92 Q55 87 50 108 L39 163 30 205 32 223 43 213 54 181 68 130Z':'M59 92 Q48 88 45 108 L38 163 29 204 31 223 43 213 54 181 71 131Z'}/><path d={female?'M130 92 Q145 87 150 108 L161 163 170 205 168 223 157 213 146 181 132 130Z':'M141 92 Q152 88 155 108 L162 163 171 204 169 223 157 213 146 181 129 131Z'}/><path d={female?'M73 240 Q68 263 75 312 L80 339 77 393 81 431 93 431 100 346 98 261Z':'M75 239 Q71 261 78 312 L82 339 78 393 81 431 94 431 100 346 98 260Z'}/><path d={female?'M127 240 Q132 263 125 312 L120 339 123 393 119 431 107 431 100 346 102 261Z':'M125 239 Q129 261 122 312 L118 339 122 393 119 431 106 431 100 346 102 260Z'}/></g>
+ <g transform={female?'translate(3 0) scale(.97 1)':undefined}>{parts.filter(z=>z.side===side||z.side==='both').map(z=>{const v=loads[z.id]||0;return <path key={z.id} role="button" tabIndex={0} aria-label={`${names[z.id]}, нагрузка ${v}`} onClick={()=>setSelected(z.id)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')setSelected(z.id)}} d={z.d} fill={selected===z.id?'rgba(10,132,255,.92)':v>0?`rgba(10,132,255,${.28+.62*v/max})`:'#344b51'} stroke={selected===z.id?'#ffffff':'#648186'} strokeWidth={selected===z.id?2.5:1} style={{cursor:'pointer'}}><title>{names[z.id]}</title></path>})}</g></svg>
+ <p className="muted small" style={{textAlign:'center'}}>{selected?`${names[selected]}: ${(loads[selected]||0).toFixed(1)} условных подходов`:female?'Женская модель: более узкие плечи и выраженная линия таза':'Мужская модель: более широкие плечи и торс'}</p>
+ <div className="muscle-legend">{all.map(k=><button key={k} className={selected===k?'active':''} aria-pressed={selected===k} onClick={()=>{setSelected(k);setSide(['back','traps','glutes','hamstrings','calves'].includes(k)?'back':'front')}}><span>{names[k]}</span><b>{(loads[k]||0).toFixed(1)}</b></button>)}</div>
+ <p className="muted small">Схематическая карта тренировочной нагрузки. Передняя поверхность голени не обозначается как икроножная мышца.</p></div>
+}
+
+// Compact local ZIP/XLSX reader. Only simple .xlsx worksheets; formulas are read via cached values.
+async function xlsxAsRows(file:File):Promise<string[][]>{
+ const bytes=new Uint8Array(await file.arrayBuffer()),view=new DataView(bytes.buffer);let end=-1;
+ for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--)if(view.getUint32(i,true)===0x06054b50){end=i;break}
+ if(end<0)throw new Error('Не найден ZIP-контейнер XLSX');let pos=view.getUint32(end+16,true);const count=view.getUint16(end+10,true);const entries=new Map<string,{offset:number,packed:number,method:number}>();
+ for(let j=0;j<count;j++){if(view.getUint32(pos,true)!==0x02014b50)break;const method=view.getUint16(pos+10,true),packed=view.getUint32(pos+20,true),nl=view.getUint16(pos+28,true),el=view.getUint16(pos+30,true),cl=view.getUint16(pos+32,true),offset=view.getUint32(pos+42,true);const name=new TextDecoder().decode(bytes.slice(pos+46,pos+46+nl));entries.set(name,{offset,packed,method});pos+=46+nl+el+cl}
+ async function read(name:string){const e=entries.get(name);if(!e)return '';const start=e.offset+30+view.getUint16(e.offset+26,true)+view.getUint16(e.offset+28,true),data=bytes.slice(start,start+e.packed);if(e.method===0)return new TextDecoder().decode(data);if(e.method!==8)throw new Error('Неподдерживаемое сжатие XLSX');const stream=new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw' as CompressionFormat));return await new Response(stream).text()}
+ const shared=await read('xl/sharedStrings.xml');const doc=new DOMParser();const strings=shared?Array.from(doc.parseFromString(shared,'text/xml').getElementsByTagName('si')).map(el=>el.textContent||''):[];const path=Array.from(entries.keys()).find(x=>/^xl\/worksheets\/sheet\d+\.xml$/.test(x));if(!path)throw new Error('Лист XLSX не найден');const xml=doc.parseFromString(await read(path),'text/xml');const rows=Array.from(xml.getElementsByTagName('row')).slice(0,2000);return rows.map(row=>{const result:string[]=[];for(const cell of Array.from(row.getElementsByTagName('c'))){const ref=cell.getAttribute('r')||'A';let idx=0;for(const ch of (ref.match(/^[A-Z]+/)?.[0]||'A'))idx=idx*26+ch.charCodeAt(0)-64;idx--;if(idx>80)continue;const value=cell.getElementsByTagName('v')[0]?.textContent||cell.getElementsByTagName('is')[0]?.textContent||'';result[idx]=cell.getAttribute('t')==='s'?strings[Number(value)]||'':value}return result.map(v=>v||'')})
+}
+function tableToTraining(rows:string[][]):ExerciseLine[]{
+ const groups=new Map<string,SetLine[]>();for(const [idx,row] of rows.entries()){if(idx===0&&row.some(x=>/упражнен|exercise|weight|вес|повтор/i.test(x)))continue;const name=(row[0]||'').trim();if(!name)continue;const weight=Number((row[1]||'0').replace(',','.')),reps=Number(row[2]||8),done=/^(1|true|да|yes|done|✓|x)$/i.test((row[3]||'').trim());if(!Number.isFinite(weight)||!Number.isFinite(reps)||weight<0||reps<0)continue;groups.set(name,[...(groups.get(name)||[]),{...blankSet(),weight,reps,done}])}return Array.from(groups,([name,sets])=>({id:uid(),name,sets}))
+}
+function fromPortableJson(data:unknown):ExerciseLine[]{
+ if(!data||typeof data!=='object')throw new Error('Неверная структура JSON');const obj=data as Record<string,unknown>;const candidate=Array.isArray(obj.exercises)?obj.exercises:Array.isArray(obj.rows)?obj.rows:Array.isArray(obj.workouts)?(obj.workouts[0] as Record<string,unknown>)?.exercises:null;
+ if(!Array.isArray(candidate))throw new Error('Нет списка exercises/rows в JSON');return candidate.map((raw:unknown)=>{const x=raw as Record<string,unknown>;const name=String(x.name||x.exercise||'').trim();const sets=Array.isArray(x.sets)?x.sets.map((v:unknown)=>{const a=v as Record<string,unknown>;return {...blankSet(),weight:Number(a.weight||0),reps:Number(a.reps||0),done:a.done===true||a.completed===true}}):[];if(!name||!sets.length||sets.some(s=>!Number.isFinite(s.weight)||!Number.isFinite(s.reps)||s.weight<0||s.reps<0))throw new Error('Ошибочный подход в импортируемом JSON');return {id:uid(),name,sets}})
 }
 
 type Tab = 'train' | 'history' | 'progress' | 'calendar' | 'body' | 'muscles'
 type Editor = 'program' | 'session' | null
 const formatDate = (s: string) => new Date(s).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' })
 const fmt = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 1 })
-const newLine = (name: string): ExerciseLine => ({ id: uid(), name:normalizedExerciseName(name), sets: [blankSet(), blankSet(), blankSet()] })
+const newLine = (name: string): ExerciseLine => ({ id: uid(), name, sets: [blankSet(), blankSet(), blankSet()] })
 const newSet = (weight: number, reps: number): SetLine => ({ id: uid(), weight, reps, done: false })
 const num = (value: string) => Number(value.replace(',', '.'))
 
@@ -200,7 +141,7 @@ function parseTrainingText(text: string): { exercises: ExerciseLine[], warnings:
   const exercises: ExerciseLine[] = []
   const warnings: string[] = []
   const days = /^(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)\s*[:.]?$/i
-  const bodyGroups = /^(дельты|плечи|грудь|спина|ноги|бицепс|пресс|икры)$/i
+  const bodyGroups = /^(дельты|плечи|грудь|спина|ноги|бицепс|трицепс|пресс|икры)$/i
   const blockPattern = /(\d+(?:[.,]\d+)?)\s+(\d+)\s*[/*×xх]\s*(\d+)/gi
   const setCountPattern = /^(.+?)\s+(\d+)\s*[/*×xх]\s*(\d+)(?:\s+(\d+(?:[.,]\d+)?))?$/i
   const weightRepsPattern = /^(.+?)\s+(\d+(?:[.,]\d+)?)\s*\/\s*(\d+)\s+(\d+)$/i
@@ -253,7 +194,6 @@ function parseTrainingText(text: string): { exercises: ExerciseLine[], warnings:
     }
     if (!found.length || !name) {warnings.push(`Не распознано: ${line}`);continue}
     // Preserve tempo instructions as part of the name for review.
-    name=normalizedExerciseName(name)
     const existing = exercises.find(e=>e.name.toLocaleLowerCase('ru')===name.toLocaleLowerCase('ru'))
     if (existing) existing.sets.push(...found)
     else exercises.push({id:uid(),name,sets:found})
@@ -267,8 +207,8 @@ export default function App() {
   const [programs, setPrograms] = useState<Program[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [measurements, setMeasurements] = useState<Measurement[]>([])
-  const [bodyForm, setBodyForm] = useState({date:localDay(),weight:'',waist:'',chest:'',arm:'',thigh:'',hips:'',neck:'',note:''})
-  const [calendarMonth, setCalendarMonth] = useState(localDay().slice(0,7))
+  const [bodyForm, setBodyForm] = useState({date:new Date().toISOString().slice(0,10),weight:'',waist:'',chest:'',arm:'',thigh:'',hips:'',neck:'',note:''})
+  const [calendarMonth, setCalendarMonth] = useState(new Date().toISOString().slice(0,7))
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -283,9 +223,9 @@ export default function App() {
   const [picker, setPicker] = useState(false)
   const [query, setQuery] = useState('')
   const [groupFilter,setGroupFilter]=useState('Все')
-  const [viewMode,setViewMode]=useState<'simple'|'compact'>(()=>localStorage.getItem('osfit-view-mode')==='simple'?'simple':'compact')
-  const compact=viewMode==='compact'
-  const changeViewMode=(v:'simple'|'compact')=>{setViewMode(v);localStorage.setItem('osfit-view-mode',v)}
+  const [viewMode,setViewMode]=useState<'simple'|'compact'|'expanded'>(()=>{const v=localStorage.getItem('osfit-view-mode');return v==='simple'||v==='expanded'||v==='compact'?v:localStorage.getItem('osfit-compact')==='false'?'expanded':'compact'})
+  const compact=viewMode!=='expanded'
+  const changeViewMode=(v:'simple'|'compact'|'expanded')=>{setViewMode(v);localStorage.setItem('osfit-view-mode',v)}
   const [expandedRows,setExpandedRows]=useState<string[]>([])
   const [extrasRows,setExtrasRows]=useState<string[]>([])
   const [undoRows,setUndoRows]=useState<ExerciseLine[][]>([])
@@ -298,6 +238,7 @@ export default function App() {
   const [goalReps,setGoalReps]=useState('1')
   const [goalReferenceWeight,setGoalReferenceWeight]=useState('0')
   const [goalArchive,setGoalArchive]=useState(false)
+  const [showGoalForm,setShowGoalForm]=useState(false)
   const [goalNotice,setGoalNotice]=useState<string[]>([])
   useEffect(()=>{localStorage.setItem('osfit-strength-goals',JSON.stringify(goals))},[goals])
   const goalScore=(g:StrengthGoal,history:Workout[])=>{
@@ -324,14 +265,11 @@ export default function App() {
   const [detail, setDetail] = useState<Workout | null>(null)
   const [importing, setImporting] = useState(false)
   const [textImport, setTextImport] = useState(false)
-  const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [planText, setPlanText] = useState('')
   const [planName, setPlanName] = useState('Импорт из IRONLOG')
   const [profile,setProfile]=useState<Profile>(getProfile)
   const [schedule,setSchedule]=useState<Schedule[]>([])
-
-  useEffect(()=>{localStorage.removeItem('osfit-sync-url');localStorage.removeItem('osfit-sync-key')},[])
-  const [plannedDate,setPlannedDate]=useState(localDay())
+  const [plannedDate,setPlannedDate]=useState(new Date().toISOString().slice(0,10))
   const [plannedProgram,setPlannedProgram]=useState('')
   const [repeatDays,setRepeatDays]=useState(0)
   const [musclePeriod,setMusclePeriod]=useState(()=>Number(localStorage.getItem('osfit-muscle-period'))||7)
@@ -351,12 +289,11 @@ export default function App() {
   const [ironlogPreview,setIronlogPreview]=useState<{programs:Program[],workouts:Workout[],measurements:Measurement[],warnings:string[]}|null>(null)
   useEffect(()=>{if(!restUntil)return;const timer=window.setInterval(()=>setClock(Date.now()),1000);return()=>window.clearInterval(timer)},[restUntil])
   const secondsLeft=Math.max(0,Math.ceil((restUntil-clock)/1000))
-  useEffect(()=>{if(editor==='session'&&rows.length){localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId,sessionId:localStorage.getItem('osfit-widget-session')||''}))}},[editor,rows,name,activeProgramId,editingWorkoutId])
-
+  useEffect(()=>{if(editor==='session'&&rows.length){localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId}))}},[editor,rows,name,activeProgramId,editingWorkoutId])
   const saveSessionDraft = () => {
     if(editor!=='session') return
     try {
-      localStorage.setItem('osfit-session-draft', JSON.stringify({name,rows,activeProgramId,editingWorkoutId,sessionId:localStorage.getItem('osfit-widget-session')||'',savedAt:new Date().toISOString()}))
+      localStorage.setItem('osfit-session-draft', JSON.stringify({name,rows,activeProgramId,editingWorkoutId,savedAt:new Date().toISOString()}))
       setDraft(true)
       setDirty(false)
       setEditor(null)
@@ -364,14 +301,13 @@ export default function App() {
       tell('Тренировка сохранена. Продолжить можно на главной.')
     } catch (e) { setError('Не удалось сохранить черновик: '+String(e)) }
   }
-  const restoreDraft=()=>{try{const d=JSON.parse(localStorage.getItem('osfit-session-draft')||'null');if(!d||!Array.isArray(d.rows))return;localStorage.setItem('osfit-widget-session',d.sessionId||crypto.randomUUID());setName(d.name);setRows(d.rows);setActiveProgramId(d.activeProgramId??null);setEditingWorkoutId(d.editingWorkoutId??null);setEditor('session');setDraft(false)}catch{setError('Черновик повреждён')}}
+  const restoreDraft=()=>{try{const d=JSON.parse(localStorage.getItem('osfit-session-draft')||'null');if(!d||!Array.isArray(d.rows))return;setName(d.name);setRows(d.rows);setActiveProgramId(d.activeProgramId??null);setEditingWorkoutId(d.editingWorkoutId??null);setEditor('session');setDraft(false)}catch{setError('Черновик повреждён')}}
   const storeProfile=(patch:Partial<Profile>)=>{setProfile(old=>{const p={...old,...patch};saveProfile(p);return p})}
   const addPlanned=async()=>{if(!plannedProgram)return setError('Выберите программу');try{await saveSchedule({id:uid(),date:plannedDate,programId:plannedProgram,repeatDays:repeatDays||undefined});setSchedule(await allSchedule());tell('Тренировка запланирована')}catch(e){setError(String(e))}}
   const removePlanned=async(id:string)=>{await deleteSchedule(id);setSchedule(await allSchedule())}
   const upcoming=(day:string)=>schedule.filter(a=>{const delta=Math.round((Date.parse(day+'T12:00:00')-Date.parse(a.date+'T12:00:00'))/86400000);return delta>=0&&(delta===0||!!a.repeatDays&&delta%a.repeatDays===0)})
 
   useEffect(()=>{setDraft(!!localStorage.getItem('osfit-session-draft'))},[])
-
   const createTemplate=async(index:number)=>{try{const tmpl=PLAN_TEMPLATES[index];for(const day of tmpl.days)await saveProgram({id:uid(),name:day.name,createdAt:new Date().toISOString(),exercises:toLines(day.items)});await load();setShowTemplates(false);tell(`Добавлено программ: ${tmpl.days.length}`)}catch(e){setError(String(e))}}
   const savePortable=()=>{if(editor!=='session'||!rows.length)return;const data={format:'osfit-active-session',version:1,name,exercises:rows,savedAt:new Date().toISOString()};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='osfit-active-session.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);tell('Файл текущей тренировки сохранён')}
   const importPortable=async(file:File)=>{try{const extension=file.name.split('.').pop()?.toLowerCase();let exercises:ExerciseLine[]=[];if(extension==='json')exercises=fromPortableJson(JSON.parse(await file.text()));else if(extension==='xlsx')exercises=tableToTraining(await xlsxAsRows(file));else if(extension==='csv'){const text=await file.text();const delim=text.split(/\r?\n/)[0].includes(';')?';':',';exercises=tableToTraining(text.split(/\r?\n/).map(x=>x.split(delim).map(v=>v.trim().replace(/^"|"$/g,''))))}else if(extension==='txt')exercises=parseTrainingText(await file.text()).exercises;else throw new Error('Поддерживаются TXT, JSON, CSV и XLSX');if(!exercises.length)throw new Error('Не найдено распознанных упражнений');if(!window.confirm(`Импортировать ${exercises.length} упражнений? Текущие несохранённые изменения будут заменены.`))return;setName(file.name.replace(/\.[^.]+$/,''));setRows(exercises);setActiveProgramId(null);setEditingWorkoutId(null);setEditor('session');setSettings(false);setTextImport(false);setShowTemplates(false);setDirty(true);setPortableInfo(`Импортировано ${exercises.length} упражнений. Проверьте выполненные подходы.`);tell('Тренировка загружена')}catch(e){setError(e instanceof Error?e.message:String(e))}}
@@ -399,7 +335,7 @@ export default function App() {
   const abandon = () => {
     if (editor === 'session') {
       try {
-        localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId,sessionId:localStorage.getItem('osfit-widget-session')||'',savedAt:new Date().toISOString()}))
+        localStorage.setItem('osfit-session-draft',JSON.stringify({name,rows,activeProgramId,editingWorkoutId,savedAt:new Date().toISOString()}))
         setDraft(true)
         setDirty(false)
         setEditor(null)
@@ -425,7 +361,7 @@ export default function App() {
   const beginSession = (p: Program) => {
     if (localStorage.getItem('osfit-session-draft') && !window.confirm('Есть сохранённая незавершённая тренировка. Начать новую вместо неё? Старая будет заменена.')) return
     if (!abandon()) return
-    localStorage.setItem('osfit-widget-session',crypto.randomUUID());setName(p.name); setRows(cloneLines(p.exercises));setExpandedRows([]);setUndoRows([])
+    setName(p.name); setRows(cloneLines(p.exercises));setExpandedRows([]);setUndoRows([])
     setActiveProgramId(p.id); setEditingWorkoutId(null); setEditor('session'); setDirty(false)
   }
   const changeRow = (index: number, fn: (r: ExerciseLine) => ExerciseLine) => {
@@ -493,20 +429,21 @@ export default function App() {
     try { await deleteWorkout(id); setDetail(null); await load() } catch (e) { setError(String(e)) }
   }
   const download = async () => {
+    setBackupAt(new Date().toISOString());localStorage.setItem('osfit-last-backup',new Date().toISOString())
     try {
       const data = await exportBackup()
-      const url = URL.createObjectURL(new Blob([JSON.stringify({...data,strengthGoals:goals,activeSession:(()=>{try{return editor==='session'?{name,rows,activeProgramId,editingWorkoutId,savedAt:new Date().toISOString()}:JSON.parse(localStorage.getItem('osfit-session-draft')||'null')}catch{return null}})(),preferences:{'osfit-view-mode':localStorage.getItem('osfit-view-mode'),'osfit-muscle-period':localStorage.getItem('osfit-muscle-period'),'osfit-rest':localStorage.getItem('osfit-rest'),'osfit-theme':localStorage.getItem('osfit-theme')}}, null, 2)], { type: 'application/json' }))
+      const url = URL.createObjectURL(new Blob([JSON.stringify({...data,strengthGoals:goals}, null, 2)], { type: 'application/json' }))
       const a = document.createElement('a'); a.href = url
       a.download = `osfit-backup-${new Date().toISOString().slice(0, 10)}.json`
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setBackupAt(new Date().toISOString());localStorage.setItem('osfit-last-backup',new Date().toISOString());tell('Архив подготовлен — убедитесь, что файл сохранён в «Файлы»')
+      tell('Архив подготовлен')
     } catch (e) { setError(String(e)) }
   }
   const upload = async (f: File) => {
     try {
       const payload = JSON.parse(await f.text())
       if (!window.confirm('Импорт заменит все программы и историю. Продолжить?')) return
-      setImporting(true); await importBackup(payload);if(payload.activeSession&&Array.isArray(payload.activeSession.rows)){localStorage.setItem('osfit-session-draft',JSON.stringify(payload.activeSession));setDraft(true)}else{localStorage.removeItem('osfit-session-draft');setDraft(false)}if(payload.preferences&&typeof payload.preferences==='object'){for(const [k,v] of Object.entries(payload.preferences))if(k.startsWith('osfit-')&&typeof v==='string')localStorage.setItem(k,v)} if(Array.isArray(payload.strengthGoals)){setGoals(payload.strengthGoals.filter((g:StrengthGoal)=>typeof g?.id==='string'&&typeof g.exercise==='string'&&typeof g.target==='number'))} await load(); setSettings(false)
+      setImporting(true); await importBackup(payload); if(Array.isArray(payload.strengthGoals)){setGoals(payload.strengthGoals.filter((g:StrengthGoal)=>typeof g?.id==='string'&&typeof g.exercise==='string'&&typeof g.target==='number'))}else{setGoals([])} await load(); setSettings(false)
       tell('Данные восстановлены')
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setImporting(false); if (file.current) file.current.value = '' }
@@ -540,6 +477,23 @@ export default function App() {
   const recommendedWeight=(exercise:string)=>{for(const w of workouts){const line=w.exercises.find(e=>e.name.toLowerCase()===exercise.toLowerCase());if(!line)continue;const done=line.sets.filter(s=>s.done&&s.weight>0);if(!done.length)continue;const top=Math.max(...done.map(s=>s.weight));return Math.round((top+(done.every(s=>s.reps>=8)?profile.weightStep:0))/profile.weightStep)*profile.weightStep}return null}
   const handleIronlog=async(f:File)=>{setIronlogFile(f);setIronlogPreview(null);try{const raw=JSON.parse(await f.text()) as unknown;const result=convertIronlog(raw);setIronlogPreview(result)}catch(e){setError(e instanceof Error?e.message:String(e))}}
   const applyIronlog=async()=>{if(!ironlogPreview||!ironlogFile)return;try{if(!window.confirm(`Добавить ${ironlogPreview.workouts.length} тренировок и ${ironlogPreview.programs.length} программ? Существующие записи останутся.`))return;for(const p of ironlogPreview.programs)await saveProgram(p);for(const w of ironlogPreview.workouts)await saveWorkout(w);for(const m of ironlogPreview.measurements)await saveMeasurement(m);await load();setIronlogPreview(null);setIronlogFile(null);tell('Данные IRONLOG добавлены')}catch(e){setError(String(e))}}
+  // The mini widget operates on the active workout or its locally saved draft.
+  // Never reorder the source rows; the widget sorts only its presentation.
+  const miniDraft=(()=>{if(editor==='session')return {name,rows};try{const x=JSON.parse(localStorage.getItem('osfit-session-draft')||'null') as {name?:string,rows?:ExerciseLine[]}|null;return x&&Array.isArray(x.rows)?{name:x.name||'Тренировка',rows:x.rows}:null}catch{return null}})()
+  const toggleMiniExercise=(id:string)=>{
+    const update=(current:ExerciseLine[])=>current.map(e=>{
+      if(e.id!==id||!e.sets.length)return e
+      const finish=!e.sets.every(s=>s.done)
+      return {...e,sets:e.sets.map(s=>({...s,done:finish}))}
+    })
+    if(editor==='session'){
+      setUndoRows(old=>[...old.slice(-9),structuredClone(rows)])
+      setRows(update)
+      setDirty(true)
+    }else{
+      try{const raw=JSON.parse(localStorage.getItem('osfit-session-draft')||'null');if(!raw||!Array.isArray(raw.rows))return;raw.rows=update(raw.rows);localStorage.setItem('osfit-session-draft',JSON.stringify(raw));setDraft(true);setMiniRevision(n=>n+1)}catch{setError('Не удалось сохранить состояние мини-виджета')}
+    }
+  }
   const sortedRows=editor==='session'?[...rows.filter(r=>!r.sets.length||r.sets.some(s=>!s.done)),...rows.filter(r=>r.sets.length>0&&r.sets.every(s=>s.done))]:rows
   const undo=()=>{const prev=undoRows.at(-1);if(!prev)return;setRows(prev);setUndoRows(x=>x.slice(0,-1));setDirty(true)}
   const toggleRow=(id:string)=>setExpandedRows(x=>x.includes(id)?x.filter(v=>v!==id):[...x,id])
@@ -562,7 +516,7 @@ export default function App() {
   return <div className="app">
     <header className="header">
       <div className="brand"><span className="brand-icon"><Dumbbell size={22}/></span><div><strong>OSFIT</strong><small>ТРЕНИРОВКИ БЕЗ ЛИШНЕГО</small></div></div>
-      <button title="Настройки и архив" aria-label="Настройки и архив" className="icon-btn osfit-settings-button" onClick={() => { if (!abandon()) return; setTextImport(false); setSettings(true) }}><Settings size={22}/></button>
+      <button title="Настройки и архив" className="icon-btn" onClick={() => { if (!abandon()) return; setTextImport(false); setSettings(true) }}><Settings size={22}/></button>
     </header>
     {error && <div className="error" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
     {notice && <div className="toast">{notice}</div>}
@@ -570,14 +524,13 @@ export default function App() {
     {personalRecord && editor === 'session' && <div className="osfit-pr" role="status"><span>🏆 Новый рекорд 1ПМ: <b>{personalRecord.exercise}</b> · {personalRecord.weight} кг × {personalRecord.reps} (≈{fmt(personalRecord.estimated)} кг)</span><button aria-label="Закрыть уведомление" onClick={()=>setPersonalRecord(null)}>×</button></div>}
     {lastSummary && !editor && <div className="osfit-report" role="region" aria-label="Итоги завершённой тренировки"><div className="osfit-report-head"><strong>✓ Тренировка сохранена · {lastSummary.name}</strong><button onClick={()=>setLastSummary(null)} aria-label="Закрыть отчёт">×</button></div><div className="osfit-report-stats"><span>Упражнений <b>{lastSummary.exercises}</b></span><span>Подходов <b>{lastSummary.sets}</b></span><span>Тоннаж <b>{fmt(lastSummary.volume)} кг</b></span><span>Новых 1ПМ <b>{lastSummary.prs.length}</b></span></div>{lastSummary.prs.length>0&&<p>🏆 {lastSummary.prs.join(', ')}</p>}<p className="muted small">Рекорды рассчитаны по формуле Эпли, а не по фактическому максимуму.</p></div>}
     <style>{OSFIT_CSS + `.osfit-pr,.osfit-report{position:relative;margin:12px 16px;padding:14px;border:1px solid #3f7761;border-radius:14px;background:#172820;color:#e5f6ed;z-index:5}.osfit-pr{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-pr button,.osfit-report-head button{border:0;background:transparent;color:inherit;font-size:24px;cursor:pointer}.osfit-report-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.osfit-report-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.osfit-report-stats span{display:flex;flex-direction:column;font-size:12px;color:#acc5b8}.osfit-report-stats b{font-size:17px;color:#ecfff3}.osfit-report p{margin:10px 0 0}`}</style><main className="content">
+      {miniDraft&&miniDraft.rows.length>0&&!settings&&!detail&&!textImport&&(editor==='session'||(!editor&&tab==='train'))&&<WorkoutMiniWidget key={miniRevision} name={miniDraft.name} exercises={miniDraft.rows} onToggle={toggleMiniExercise} onOpen={editor==='session'?undefined:restoreDraft} compact={editor==='session'}/>}
 
       {!editor&&!settings&&!detail&&!textImport&&['history','body','muscles'].includes(tab)&&<div className="osfit-view-buttons"><button className={tab==='history'?'active':''} onClick={()=>switchTab('history')}>История</button><button className={tab==='body'?'active':''} onClick={()=>switchTab('body')}>Замеры</button><button className={tab==='muscles'?'active':''} onClick={()=>switchTab('muscles')}>Мышцы</button></div>}
       {busy ? <p>Загрузка данных…</p> : settings ? <section className={compact?'osfit-compact':''}>
         <button className="back" onClick={() => setSettings(false)}><ArrowLeft size={17}/> Назад</button>
         <h1>Настройки и данные</h1>
         <div className="osfit-settings-row"><ThemeToggle/></div>
-
-        <label className="field-label">Вид тренировки</label><div className="osfit-segmented" role="group" aria-label="Вид тренировки">{(['simple','compact'] as const).map(v=><button key={v} className={viewMode===v?'active':''} aria-pressed={viewMode===v} onClick={()=>changeViewMode(v)}>{v==='simple'?'Простой':'Компактный'}</button>)}</div>
         <div className="osfit-goals-panel">
           <h2>Силовые цели</h2><p className="muted small">Несколько целей по любым упражнениям. Достижение проверяется по выполненным рабочим подходам; цели остаются до выполнения или удаления.</p>
           <div className="osfit-segmented"><button className={!goalArchive?'active':''} onClick={()=>setGoalArchive(false)}>Активные ({goals.filter(g=>!g.completedAt).length})</button><button className={goalArchive?'active':''} onClick={()=>setGoalArchive(true)}>Достигнутые ({goals.filter(g=>g.completedAt).length})</button></div>
@@ -587,7 +540,8 @@ export default function App() {
             <div className="osfit-goal-progress"><div style={{width:`${Math.min(100,Math.max(0,bestResult/g.target*100))}%`}}/></div>
             <small>{g.completedAt?`Достигнута ${new Date(g.completedAt).toLocaleDateString('ru-RU')} · результат ${Number(bestResult.toFixed(2))} ${unit}`:`Лучший результат: ${Number(bestResult.toFixed(2))} ${unit}`}</small>
           </article>})}
-          {!goalArchive&&<div className="osfit-goal-card"><strong>Добавить цель</strong><label className="field-label">Упражнение</label><input className="input" list="osfit-goal-exercises" placeholder="Название упражнения" value={goalExercise} onChange={e=>setGoalExercise(e.target.value)}/><datalist id="osfit-goal-exercises">{Array.from(new Set([...exerciseCatalog,...programs.flatMap(p=>p.exercises.map(e=>e.name))])).map(x=><option key={x} value={x}/>)}</datalist>
+          {!goalArchive&&<button className="btn secondary full" type="button" aria-expanded={showGoalForm} onClick={()=>setShowGoalForm(v=>!v)}>{showGoalForm?'Скрыть форму':'＋ Добавить цель'}</button>}
+          {!goalArchive&&showGoalForm&&<div className="osfit-goal-card"><strong>Новая цель</strong><label className="field-label">Упражнение</label><input className="input" list="osfit-goal-exercises" placeholder="Название упражнения" value={goalExercise} onChange={e=>setGoalExercise(e.target.value)}/><datalist id="osfit-goal-exercises">{Array.from(new Set([...exerciseCatalog,...programs.flatMap(p=>p.exercises.map(e=>e.name))])).map(x=><option key={x} value={x}/>)}</datalist>
             <label className="field-label">Показатель</label><select className="input" value={goalKind} onChange={e=>setGoalKind(e.target.value as GoalKind)}><option value="weight">Вес и повторения</option><option value="reps">Повторения при заданном весе</option><option value="estimated">Расчётный 1ПМ</option></select>
             <label className="field-label">Целевое значение ({goalKind==='reps'?'повторения':'кг'})</label><input className="input" type="number" min="0" step="any" inputMode="decimal" value={goalTarget} onChange={e=>setGoalTarget(e.target.value)}/>
             {goalKind==='weight'&&<><label className="field-label">Минимум повторений с этим весом</label><input className="input" type="number" min="1" step="1" value={goalReps} onChange={e=>setGoalReps(e.target.value)}/></>}
@@ -614,7 +568,7 @@ export default function App() {
         <label className="field-label">Перенос JSON из Scriptable IRONLOG</label>
         <input className="input" type="file" accept=".json,application/json" onChange={e=>{const f=e.target.files?.[0];if(f)void handleIronlog(f)}}/>
         {ironlogPreview&&<div className="card"><strong>Предпросмотр переноса</strong><p>Тренировок: {ironlogPreview.workouts.length} · Программ: {ironlogPreview.programs.length} · Замеров: {ironlogPreview.measurements.length}</p>{ironlogPreview.warnings.slice(0,12).map((w,i)=><p className="muted small" key={i}>{w}</p>)}<button className="btn primary full" disabled={!ironlogPreview.workouts.length&&!ironlogPreview.programs.length&&!ironlogPreview.measurements.length} onClick={()=>void applyIronlog()}>Добавить распознанные данные</button></div>}
-        <div className="card"><strong>OSFIT 4.9 — Workout Fixes</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
+        <div className="card"><strong>OSFIT 4.1 — Smart Workout</strong><p className="muted small">IndexedDB · офлайн PWA · без аккаунтов</p></div>
       </section> : textImport ? <section>
         <button className="back" onClick={() => setTextImport(false)}><ChevronLeft size={18}/> К программам</button>
         <p className="eyebrow">ИМПОРТ IRONLOG</p><h1>Импорт плана</h1>
@@ -630,43 +584,30 @@ export default function App() {
         </div>
         <button className="btn primary full" onClick={() => void importPlan()} disabled={!parsed.exercises.length}><Save size={18}/> Сохранить программу</button>
       </section> : editor ? <section>
-        <div className="osfit-session-toolbar"><button className="back" onClick={abandon}><ChevronLeft size={18}/> Назад</button>{editor==='session'&&<button className="btn secondary compact" onClick={saveSessionDraft}><Save size={16}/> Пауза и выйти</button>}</div>
+        <div className="osfit-session-toolbar"><button className="back" onClick={abandon}><ChevronLeft size={18}/> Назад</button>{editor==='session'&&<button className="btn secondary compact" onClick={saveSessionDraft}><Save size={16}/> Сохранить и выйти</button>}</div>
         <div className="page-heading"><div><p className="eyebrow">{editor === 'program' ? 'КОНСТРУКТОР' : 'АКТИВНАЯ ТРЕНИРОВКА'}</p><h1>{editor === 'program' ? 'Редактор программы' : 'Тренировка'}</h1></div></div>
         <label className="field-label">Название</label>
         <input className="input title-input" value={name} onChange={e => { setName(e.target.value); setDirty(true) }} placeholder="Название"/>
         {editor === 'session' && <><button className="btn secondary full" onClick={savePortable}><Download size={17}/> Экспортировать текущую тренировку</button>{portableInfo&&<p className="osfit-helper">{portableInfo}</p>}</>}
         {editor === 'session' && <div className="card"><div className="exercise-head"><strong>Таймер отдыха</strong><button className="btn secondary compact" onClick={startRest}>Старт {restDuration} с</button></div><strong>{secondsLeft>0?`${Math.floor(secondsLeft/60)}:${String(secondsLeft%60).padStart(2,'0')}`:'Готов'}</strong><button className="tiny-icon" onClick={()=>setRestUntil(0)}>Сброс</button></div>}
-        {editor === 'session' && <div className="osfit-inline-actions"><button onClick={undo} disabled={!undoRows.length}>↶ Отменить действие</button><div className="osfit-segmented" role="group" aria-label="Вид тренировки">{(['simple','compact'] as const).map(v=><button key={v} className={viewMode===v?'active':''} aria-pressed={viewMode===v} onClick={()=>changeViewMode(v)}>{v==='simple'?'Простой':'Компактный'}</button>)}</div></div>}
-        {editor === 'session' && <div className="session-stats"><span><b>{doneCount} / {setCount}</b><small> подходов</small></span><span><b>{fmt(volumeOf(rows))} кг</b><small> тоннаж</small></span></div>}
-        {sortedRows.map((r) => {const i=rows.findIndex(v=>v.id===r.id);const finished=editor==='session'&&r.sets.length>0&&r.sets.every(v=>v.done);const collapsed=finished|| (viewMode==='simple'? !expandedRows.includes(r.id):expandedRows.includes(r.id));return <article className={'exercise-card osfit-mode-'+viewMode+(finished?' osfit-completed':'')} key={r.id}>
-          <div className="exercise-head"><div><span className="exercise-number">{String(i + 1).padStart(2, '0')}</span> <strong>{r.name}</strong></div><button className="tiny-icon" title="Удалить упражнение" onClick={() => { setRows(old => old.filter((_, k) => k !== i)); setDirty(true) }}><Trash2 size={17}/></button></div>
+        {editor === 'session' && <div className="osfit-inline-actions"><button onClick={undo} disabled={!undoRows.length}>↶ Отменить действие</button><div className="osfit-segmented" role="group" aria-label="Вид тренировки">{(['simple','compact','expanded'] as const).map(v=><button key={v} className={viewMode===v?'active':''} aria-pressed={viewMode===v} onClick={()=>changeViewMode(v)}>{v==='simple'?'Простой':v==='compact'?'Компактный':'Полный'}</button>)}</div></div>}
+        {editor === 'session' && <div className="session-stats"><span><b>{doneCount}</b> / {setCount} подходов</span><span><b>{fmt(volumeOf(rows))}</b> кг тоннаж</span></div>}
+        {sortedRows.map((r) => {const i=rows.findIndex(v=>v.id===r.id);const finished=editor==='session'&&r.sets.length>0&&r.sets.every(v=>v.done);const collapsed=finished|| (viewMode==='simple'? !expandedRows.includes(r.id):expandedRows.includes(r.id));return <article className={'exercise-card'+(finished?' osfit-completed':'')} key={r.id}>
+          <div className="exercise-head"><div><span className="exercise-number">{String(i + 1).padStart(2, '0')}</span><strong>{r.name}</strong></div><button className="tiny-icon" title="Удалить упражнение" onClick={() => { setRows(old => old.filter((_, k) => k !== i)); setDirty(true) }}><Trash2 size={17}/></button></div>
           <button className="osfit-exercise-summary" onClick={()=>toggleRow(r.id)}><span>{finished?'✓ Завершено · ':''}{r.sets.filter(x=>x.done).length}/{r.sets.length} подходов · {previous(r.name)}</span><span>{collapsed?'Развернуть':'Свернуть'}</span></button>
-          {viewMode==='simple' && editor==='session' && !finished && <div className="osfit-simple"><div className="osfit-simple-plan">{r.sets.length?`${exerciseMode(r.name)==='bodyweight'?'Без веса':(r.sets.find(s=>!s.done)?.weight??r.sets[0].weight)+' '+(exerciseMode(r.name)==='plates'?'плиток (по 5 кг)':'кг')} × ${r.sets.find(s=>!s.done)?.reps??r.sets[0].reps} · ${r.sets.length} подходов`:'Нет подходов'}</div><div className="osfit-progress-track"><div style={{width:`${r.sets.length?100*r.sets.filter(s=>s.done).length/r.sets.length:0}%`}}/></div><button className="btn primary full" disabled={!r.sets.some(s=>!s.done)} onClick={()=>{const j=r.sets.findIndex(s=>!s.done);if(j>=0)changeSet(i,j,{done:true})}}>✓ Выполнить следующий подход</button>{r.sets.some(s=>s.done)&&<button className="osfit-simple-undo" onClick={()=>{const j=r.sets.map(s=>s.done).lastIndexOf(true);if(j>=0)changeSet(i,j,{done:false})}}>↶ Отменить подход</button>}</div>}
+          {viewMode==='simple' && editor==='session' && !finished && <div className="osfit-simple"><div className="osfit-simple-plan">{r.sets.length?`${r.sets.find(s=>!s.done)?.weight??r.sets[0].weight} кг × ${r.sets.find(s=>!s.done)?.reps??r.sets[0].reps} · ${r.sets.length} подходов`:'Нет подходов'}</div><div className="osfit-progress-track"><div style={{width:`${r.sets.length?100*r.sets.filter(s=>s.done).length/r.sets.length:0}%`}}/></div><button className="btn primary full" disabled={!r.sets.some(s=>!s.done)} onClick={()=>{const j=r.sets.findIndex(s=>!s.done);if(j>=0)changeSet(i,j,{done:true})}}>✓ Выполнить следующий подход</button>{r.sets.some(s=>s.done)&&<button className="osfit-simple-undo" onClick={()=>{const j=r.sets.map(s=>s.done).lastIndexOf(true);if(j>=0)changeSet(i,j,{done:false})}}>↶ Отменить подход</button>}</div>}
           {!collapsed&&<><div className="osfit-inline-actions"><button onClick={()=>changeExercise(i)}>Заменить упражнение</button><button onClick={()=>setExtrasRows(v=>v.includes(r.id)?v.filter(x=>x!==r.id):[...v,r.id])}>RPE / RIR / темп</button></div>
-          <div className="exercise-options" style={{display:viewMode==='compact'&&!extrasRows.includes(r.id)?'none':undefined}}><label>Суперсет <input className="input" placeholder="A, B..." value={r.superset||''} onChange={e=>changeRow(i,x=>({...x,superset:e.target.value}))}/></label><label>Заметка <input className="input" placeholder="Техника" value={r.note||''} onChange={e=>changeRow(i,x=>({...x,note:e.target.value}))}/></label></div>
-          {<details className="osfit-61-group"><summary>Мышцы и хват · настройки упражнения</summary>
-    <label className="field-label">Основная мышца
-      <select className="osfit-61-select" value={(r as ExtendedExercise).musclePrimary||'auto'} onChange={e=>changeRow(i,x=>({...x,musclePrimary:e.target.value}))}>
-       <option value="auto">Определять автоматически</option>
-       {muscleKeys.map(k=><option value={k} key={k}>{muscleGroupNames[k]}</option>)}
-      </select></label>
-    {(r as ExtendedExercise).musclePrimary&&((r as ExtendedExercise).musclePrimary!=='auto')&&<div className="osfit-61-group"><strong>Косвенные мышцы</strong>
-      <div className="osfit-61-muscle-checks">{muscleKeys.filter(k=>k!==(r as ExtendedExercise).musclePrimary).map(k=><label key={k} className="osfit-61-check"><input type="checkbox" checked={((r as ExtendedExercise).muscleSecondary||[]).includes(k)} onChange={e=>changeRow(i,x=>({...x,muscleSecondary:e.target.checked?[...((x as ExtendedExercise).muscleSecondary||[]),k]:((x as ExtendedExercise).muscleSecondary||[]).filter(v=>v!==k)}))}/>{muscleGroupNames[k]}</label>)}</div></div>}
-    <div className="osfit-61-grip"><label>Хват<select className="osfit-61-select" value={(r as ExtendedExercise).grip||'standard'} onChange={e=>changeRow(i,x=>({...x,grip:e.target.value as Grip}))}>
-      <option value="standard">Обычный</option><option value="pronated">Прямой</option><option value="supinated">Обратный</option><option value="neutral">Нейтральный</option><option value="mixed">Разнохват</option><option value="wide">Широкий</option><option value="narrow">Узкий</option>
-    </select></label><label className="osfit-61-check"><input type="checkbox" checked={Boolean((r as ExtendedExercise).straps)} onChange={e=>changeRow(i,x=>({...x,straps:e.target.checked}))}/>Лямки</label></div>
-    <p className="muted small">Хват и лямки — ориентировочные поправки для косвенной нагрузки предплечий, не измерение активации мышцы.</p>
-    </details>}
-          <div className="set-headers"><span>Подход</span><span>{exerciseMode(r.name)==='plates'?'Плитки × 5 кг':exerciseMode(r.name)==='optional'?'Доп. вес, кг':exerciseMode(r.name)==='bodyweight'?'Без веса':'Вес, кг'}</span><span>Повторы</span><span>{editor === 'session' ? 'Готово' : 'План'}</span></div>
+          <div className="exercise-options"><label>Суперсет <input className="input" placeholder="A, B..." value={r.superset||''} onChange={e=>changeRow(i,x=>({...x,superset:e.target.value}))}/></label><label>Заметка <input className="input" placeholder="Техника" value={r.note||''} onChange={e=>changeRow(i,x=>({...x,note:e.target.value}))}/></label></div>
+          <div className="set-headers"><span>Подход</span><span>Вес, кг</span><span>Повторы</span><span>{editor === 'session' ? 'Готово' : 'План'}</span></div>
           {r.sets.map((s, j) => <div className="set-row" key={s.id}>
             <span className="set-index">{j + 1}</span>
-            <input disabled={exerciseMode(r.name)==='bodyweight'} aria-label={`Вес подхода ${j + 1}`} type="number" min="0" max="9999" step="0.5" inputMode="decimal" value={s.weight} onChange={e => changeSet(i, j, { weight: Math.max(0, Number(e.target.value) || 0) })}/>
+            <input aria-label={`Вес подхода ${j + 1}`} type="number" min="0" max="9999" step="0.5" inputMode="decimal" value={s.weight} onChange={e => changeSet(i, j, { weight: Math.max(0, Number(e.target.value) || 0) })}/>
             <input aria-label={`Повторы подхода ${j + 1}`} type="number" min="0" max="999" inputMode="numeric" value={s.reps} onChange={e => changeSet(i, j, { reps: Math.max(0, Number(e.target.value) || 0) })}/>
             {editor === 'session' ? <label className="check-wrap"><input aria-label={`Выполнен подход ${j + 1}`} type="checkbox" checked={s.done} onChange={e => changeSet(i, j, { done: e.target.checked })}/><span><Check size={17}/></span></label> : <span className="muted center">—</span>}
             <div className="set-extras" style={{display:compact&&!extrasRows.includes(r.id)?'none':undefined}}><select aria-label="Тип подхода" value={s.kind||'work'} onChange={e=>changeSet(i,j,{kind:e.target.value as SetLine['kind']})}><option value="work">Рабочий</option><option value="warmup">Разминка</option><option value="drop">Дроп-сет</option></select><input aria-label="RPE" title="RPE" type="number" placeholder="RPE" min="1" max="10" step="0.5" value={s.rpe??''} onChange={e=>changeSet(i,j,{rpe:e.target.value?Number(e.target.value):undefined})}/><input aria-label="RIR" title="RIR" type="number" placeholder="RIR" min="0" max="10" value={s.rir??''} onChange={e=>changeSet(i,j,{rir:e.target.value?Number(e.target.value):e.target.value==='0'?0:undefined})}/><input aria-label="Темп" placeholder="Темп 3-1-1-0" value={s.tempo||''} onChange={e=>changeSet(i,j,{tempo:e.target.value})}/></div>
             <button title="Удалить подход" className="row-remove" onClick={() => changeRow(i, x => ({ ...x, sets: x.sets.filter((_, k) => k !== j) }))}>×</button>
           </div>)}
-          {editor==='session'&&profile.autoProgress&&exerciseMode(r.name)==='weight'&&<p className="muted small">Рекомендация следующего рабочего веса: {recommendedWeight(r.name)===null?'нет данных':`${recommendedWeight(r.name)} кг`} (прибавка {profile.weightStep} кг при 8+ повторах во всех выполненных подходах прошлой тренировки)</p>}
+          {editor==='session'&&profile.autoProgress&&<p className="muted small">Рекомендация следующего рабочего веса: {recommendedWeight(r.name)===null?'нет данных':`${recommendedWeight(r.name)} кг`} (прибавка {profile.weightStep} кг при 8+ повторах во всех выполненных подходах прошлой тренировки)</p>}
           <button className="add-set" onClick={() => changeRow(i, x => ({ ...x, sets: [...x.sets, {...(x.sets.at(-1)||blankSet()),id:uid(),done:false}] }))}><Plus size={16}/> Добавить подход</button>
           </>}
         </article>})}
@@ -675,7 +616,7 @@ export default function App() {
           <div className="osfit-group-filters">{groups.map(g=><button key={g} className={groupFilter===g?'active':''} onClick={()=>setGroupFilter(g)}>{g}</button>)}</div><div className="catalog osfit-pick-list">{(query.trim() ? Array.from(new Set([query.trim(), ...exerciseCatalog.filter(x => x.toLowerCase().includes(query.trim().toLowerCase()))])) : [...new Set([...exerciseCatalog,...suggestions(groupFilter)])]).filter(x=>groupFilter==='Все'||groupFor(x)===groupFilter||x===query.trim()).slice(0, 80).map(x => <button key={x} onClick={() => addExercise(x)}>{x}<Plus size={15}/></button>)}</div>
         </div> : <button className="btn secondary full" onClick={() => setPicker(true)}><Plus size={18}/> Добавить упражнение</button>}
         <button className="btn primary full save-btn" onClick={() => void saveCurrent()}><Save size={18}/>{editor === 'program' ? 'Сохранить программу' : 'Завершить и сохранить'}</button>
-        {editor === 'session' && <p className="small muted center">В подсчёт результатов попадают только выполненные подходы. В старой истории подходы без отметок учитываются отдельно как оценочные, а в новой тренировке — только реально выполненные.</p>}
+        {editor === 'session' && <p className="small muted center">В подсчёт результатов попадут только отмеченные подходы.</p>}
       </section> : detail ? <section>
         <button className="back" onClick={() => setDetail(null)}><ChevronLeft size={18}/> История</button>
         <p className="eyebrow">{formatDate(detail.date)}</p><h1>{detail.name}</h1>
@@ -685,22 +626,15 @@ export default function App() {
         <button className="btn danger full" onClick={() => void removeW(detail.id)}><Trash2 size={17}/> Удалить запись</button>
       </section> : tab === 'train' ? <section>
         <div className="page-heading"><div><p className="eyebrow">ВАШИ ТРЕНИРОВКИ</p><h1>Мои программы</h1></div><button className="btn primary compact" onClick={() => beginProgram()}><Plus size={17}/> Создать</button></div>
-        {draft&&<button className="btn primary full" onClick={restoreDraft}>Продолжить тренировку с паузы</button>}
-        <div className="osfit-home-intro"><span>{programs.length} программ · {workouts.length} завершённых тренировок</span></div>
-        {!draft && programs.length>0 && <button className="btn primary full osfit-quick-start" onClick={()=>beginSession(programs[0])}><Play size={18}/> Начать «{programs[0].name}»</button>}
-        <details className="osfit-tools"><summary>Инструменты и импорт <span>Шаблоны · импорт · статистика</span></summary>
+        {draft&&<button className="btn primary full" onClick={restoreDraft}>Продолжить незавершённую тренировку</button>}
         <button className="btn secondary full" onClick={() => setShowTemplates(v=>!v)}><Dumbbell size={17}/> Готовые системы тренировок</button>
         {backupAt&&<p className="osfit-helper">Последняя резервная копия: {new Date(backupAt).toLocaleDateString('ru-RU')}</p>}
-        {workouts.length>0&&<details className="osfit-section"><summary>Рабочий объём по группам за {musclePeriod} календарных дней</summary>{groups.filter(g=>g!=='Все').map(g=><p key={g} className="osfit-goal">{g}: {weeklyMuscleSets(workouts,g,musclePeriod)} подходов</p>)}</details>}
+        {workouts.length>0&&<details className="osfit-section"><summary>Рабочий объём по группам за 7 дней</summary>{groups.filter(g=>g!=='Все').map(g=><p key={g} className="osfit-goal">{g}: {weeklyMuscleSets(workouts,g)} подходов</p>)}</details>}
         {showTemplates&&<div className="osfit-template-list">{PLAN_TEMPLATES.map((t,i)=><button key={t.title} onClick={()=>void createTemplate(i)}><strong>{t.title}</strong><small>{t.desc} · создаст {t.days.length} программы</small></button>)}</div>}
-        <button className="btn secondary full osfit-import-main" aria-expanded={importMenuOpen} onClick={()=>setImportMenuOpen(v=>!v)}><Upload size={17}/> Импорт <span aria-hidden="true">{importMenuOpen?'⌃':'⌄'}</span></button>
+        <button className="btn secondary full" onClick={()=>portableRef.current?.click()}><Upload size={17}/> Продолжить тренировку из файла</button>
         <input ref={portableRef} hidden type="file" accept=".txt,.json,.csv,.xlsx" onChange={e=>{const f=e.target.files?.[0];if(f)void importPortable(f);e.target.value=''}}/>
-        {importMenuOpen&&<div className="card osfit-import-menu">
-          <button className="osfit-import-choice" onClick={()=>portableRef.current?.click()}><strong>Тренировка из файла</strong><small>TXT, JSON, CSV, XLSX</small></button>
-          <label className="osfit-import-choice"><strong>Готовая программа</strong><small>Общий файл JSON</small><input hidden type="file" accept=".json" onChange={e=>{const f=e.target.files?.[0];if(f)void importSharedProgram(f);e.target.value=''}}/></label>
-          <button className="osfit-import-choice" onClick={()=>{setImportMenuOpen(false);setTextImport(true)}}><strong>IRONLOG и текстовый план</strong><small>Импорт из Scriptable или текста</small></button>
-        </div>}
-        </details>
+        <label className="btn secondary full" style={{ marginBottom: 10 }}>Импорт общей программы <input hidden type="file" accept=".json" onChange={e=>{const f=e.target.files?.[0];if(f)void importSharedProgram(f);e.target.value=''}}/></label>
+        <button className="btn secondary full" style={{ marginBottom: 16 }} onClick={() => setTextImport(true)}><Upload size={17}/> Импорт IRONLOG</button>
         {!programs.length ? <div className="empty"><Dumbbell size={38}/><h2>Начните с программы</h2><p>Добавьте упражнения и подходы — затем приступайте к тренировке.</p><button className="btn primary" onClick={() => beginProgram()}><Plus size={16}/> Создать программу</button></div> : programs.map(p => <article className="program-card" key={p.id}>
           <div className="program-top"><span className="program-mark"><Dumbbell size={19}/></span><div><strong>{p.name}</strong><p className="muted small">{p.exercises.length} упражнений · {p.exercises.reduce((n, x) => n + x.sets.length, 0)} подходов</p></div></div>
           <div className="program-actions"><button onClick={() => beginSession(p)} className="btn primary"><Play size={16} fill="currentColor"/> Начать</button><button title="Редактировать" className="btn secondary icon-only" onClick={() => beginProgram(p)}><PenLine size={17}/></button><button title="Поделиться программой" className="btn secondary icon-only" onClick={()=>exportProgram(p)}><Download size={17}/></button><button title="Копировать" className="btn secondary icon-only" onClick={() => { void saveProgram({ ...p, id: uid(), name: p.name + ' (копия)', createdAt: new Date().toISOString() }).then(load).catch(e => setError(String(e))) }}><Copy size={17}/></button><button title="Удалить" className="btn secondary icon-only" onClick={() => void removeP(p.id)}><Trash2 size={17}/></button></div>
@@ -713,12 +647,12 @@ export default function App() {
         <div className="page-heading"><div><p className="eyebrow">РАСПИСАНИЕ</p><h1>Календарь</h1></div></div>
         <div className="card"><strong>Запланировать тренировку</strong><label className="field-label">Дата начала</label><input className="input" type="date" value={plannedDate} onChange={e=>setPlannedDate(e.target.value)}/><label className="field-label">Программа</label><select className="input" value={plannedProgram} onChange={e=>setPlannedProgram(e.target.value)}><option value="">Выбрать программу</option>{programs.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><label className="field-label">Повторять</label><select className="input" value={repeatDays} onChange={e=>setRepeatDays(Number(e.target.value))}><option value={0}>Однократно</option><option value={2}>Каждые 2 дня</option><option value={3}>Каждые 3 дня</option><option value={7}>Раз в неделю</option><option value={14}>Раз в 14 дней</option></select><button className="btn primary full" onClick={()=>void addPlanned()}>Добавить в календарь</button></div>
         <input className="input" type="month" value={calendarMonth} onChange={e=>setCalendarMonth(e.target.value)}/>
-        <div className="calendar-grid" role="grid" aria-label="Календарь тренировок">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><strong className="calendar-weekday" key={d}>{d}</strong>)}
-        {Array.from({length:(new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5))-1,1).getDay()+6)%7},(_,i)=><span className="calendar-empty" aria-hidden="true" key={'empty'+i}/>)}
+        <div className="calendar-grid">{['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d=><strong key={d}>{d}</strong>)}
+        {Array.from({length:(new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5))-1,1).getDay()+6)%7},(_,i)=><span key={'empty'+i}/>)}
         {Array.from({length:new Date(Number(calendarMonth.slice(0,4)),Number(calendarMonth.slice(5)),0).getDate()},(_,i)=>{
           const date=`${calendarMonth}-${String(i+1).padStart(2,'0')}`
           const count=workouts.filter(w=>w.date.slice(0,10)===date).length;const scheduled=upcoming(date).length
-          return <button type="button" aria-label={`${i+1} число: ${count} завершено, ${scheduled} запланировано`} key={date} className={'calendar-day'+(count?' trained':scheduled?' planned':'')+(date===new Date().toLocaleDateString('en-CA')?' today':'')} onClick={()=>{if(count){setTab('history');tell(`Тренировок за ${date}: ${count}`)}}}>{i+1}{count>0?<small>●</small>:scheduled>0?<small>○</small>:null}</button>
+          return <button key={date} className={count?'trained':scheduled?'planned':''} onClick={()=>{if(count){setTab('history');tell(`Тренировок за ${date}: ${count}`)}}}>{i+1}{count>0?<small>●</small>:scheduled>0?<small>○</small>:null}</button>
         })}</div>
         <h2 className="section-title">План занятий</h2>{schedule.map(a=><div className="card" key={a.id}><div className="exercise-head"><strong>{a.date} · {programs.find(p=>p.id===a.programId)?.name||'Удалённая программа'}</strong><button className="tiny-icon" onClick={()=>void removePlanned(a.id)}><Trash2 size={17}/></button></div><p className="muted small">{a.repeatDays?`Повтор каждые ${a.repeatDays} дней`:'Однократно'}</p><button className="btn secondary" onClick={()=>{const p=programs.find(p=>p.id===a.programId);if(p)beginSession(p)}}>Начать</button></div>)}
         <h2 className="section-title">Тренировки месяца</h2>
@@ -733,21 +667,20 @@ export default function App() {
         {!measurements.length?<p className="muted">Замеров пока нет</p>:measurements.map(m=><div className="card" key={m.id}><div className="exercise-head"><strong>{m.date}</strong><button className="tiny-icon" onClick={()=>void removeBody(m.id)}><Trash2 size={17}/></button></div><p className="muted small">{([['weight','Вес','кг'],['waist','Талия','см'],['chest','Грудь','см'],['arm','Рука','см'],['thigh','Бедро','см'],['hips','Таз','см'],['neck','Шея','см']] as const).filter(([k])=>m[k]!==undefined).map(([k,n,u])=>`${n}: ${m[k]} ${u}`).join(' · ')}</p>{m.note&&<p>{m.note}</p>}</div>)}
       </section> : tab === 'muscles' ? <section>
         <p className="eyebrow">АНАТОМИЯ НАГРУЗКИ</p><h1>Атлет и мышцы</h1>
-        <div className="osfit-period-pills" role="group" aria-label="Период подсветки мышц">{[7,30,90,365].map(n=><button type="button" aria-pressed={musclePeriod===n} className={musclePeriod===n?'selected':''} key={n} onClick={()=>{setMusclePeriod(n);localStorage.setItem('osfit-muscle-period',String(n))}}>{n===7?'7 дней':n===30?'30 дней':n===90?'90 дней':'365 дней'}</button>)}</div>
-        <p className="muted small">Период — календарные дни, включая сегодня. Нагрузка за {musclePeriod} дней · {workouts.filter(w=>{const t=Date.parse(w.date.slice(0,10)+'T12:00:00');return Number.isFinite(t)&&t>=new Date(localDay()+'T12:00:00').getTime()-(musclePeriod-1)*86400000&&t<=Date.now()+86400000}).length} тренировок. Кнопки 7/30/90/365 меняют именно календарный диапазон, а не число тренировок.</p>
-        <MuscleMap key={'period-'+musclePeriod} sex={profile.sex} loads={muscleLoad(workouts.filter(w=>{const t=Date.parse(w.date.slice(0,10)+'T12:00:00');return Number.isFinite(t)&&t>=new Date(localDay()+'T12:00:00').getTime()-(musclePeriod-1)*86400000&&t<=Date.now()+86400000}))}/>
-        <MuscleAudit workouts={workouts} period={musclePeriod}/>
+        <div className="osfit-period-pills" role="group" aria-label="Период подсветки мышц">{[7,30,90,365].map(n=><button type="button" aria-pressed={musclePeriod===n} className={musclePeriod===n?'selected':''} key={n} onClick={()=>{setMusclePeriod(n);localStorage.setItem('osfit-muscle-period',String(n))}}>{n===7?'7 дней':n===30?'30 дней':n===90?'90 дней':'1 год'}</button>)}</div>
+        <p className="muted small">Нагрузка за {musclePeriod} дней · {workouts.filter(w=>{const t=Date.parse(w.date);return Number.isFinite(t)&&t>=Date.now()-musclePeriod*86400000&&t<=Date.now()+86400000}).length} тренировок</p>
+        <MuscleMap key={'period-'+musclePeriod} sex={profile.sex} loads={muscleLoad(workouts.filter(w=>{const t=Date.parse(w.date);return Number.isFinite(t)&&t>=Date.now()-musclePeriod*86400000&&t<=Date.now()+86400000}))}/>
         <h2>Мышцы текущей тренировки</h2><MuscleMap sex={profile.sex} loads={activeMuscles}/>
       </section> : <section>
         <div className="page-heading"><div><p className="eyebrow">СТАТИСТИКА</p><h1>Прогресс</h1></div></div>
-        <div className="metrics"><div><small>Тренировок</small><b>{stats.sessions}</b></div><div><small>Подходов</small><b>{stats.sets}</b></div><div><small>Общий тоннаж</small><b>{fmt(stats.volume)} <em>кг</em></b></div></div>
+        <div className="metrics osfit-stat-cards"><div><small>Тренировок</small><b>{stats.sessions}</b></div><div><small>Подходов</small><b>{stats.sets}</b></div><div><small>Общий тоннаж</small><b>{fmt(stats.volume)} <em>кг</em></b></div></div>
         <h2 className="section-title">Тоннаж последних 12 тренировок</h2>
-        <div className="bars">{workouts.slice(0,12).reverse().map(w=>{const max=Math.max(1,...workouts.slice(0,12).map(x=>volumeOf(x.exercises)));return <div key={w.id} title={`${formatDate(w.date)}: ${fmt(volumeOf(w.exercises))} кг`} style={{height:`${Math.max(4,volumeOf(w.exercises)/max*100)}%`}}/>})}</div>
+        {workouts.length===0?<div className="osfit-empty-chart">График появится после сохранения первой тренировки</div>:<div className="bars">{workouts.slice(0,12).reverse().map(w=>{const max=Math.max(1,...workouts.slice(0,12).map(x=>volumeOf(x.exercises)));return <div key={w.id} title={`${formatDate(w.date)}: ${fmt(volumeOf(w.exercises))} кг`} style={{height:`${Math.max(4,volumeOf(w.exercises)/max*100)}%`}}/>})}</div>}
         <h2 className="section-title">Прогресс по упражнению</h2>
         <select className="input" value={selectedExercise} onChange={e=>setSelectedExercise(e.target.value)}><option value="">Выберите упражнение</option>{exerciseNames.map(n=><option key={n}>{n}</option>)}</select>
         {selectedExercise&&<div className="card"><div className="bars">{exerciseSeries.slice(-16).map((x,i)=>{const max=Math.max(1,...exerciseSeries.map(t=>t.value));return <div key={i} title={`${x.date}: ${x.value} кг`} style={{height:`${Math.max(5,x.value/max*100)}%`}}/>})}</div><p className="muted small">Максимальный выполненный вес, от старых тренировок к новым.</p></div>}
         <h2 className="section-title">Расчётные рекорды 1ПМ</h2>
-        {!best.size ? <div className="empty compact-empty"><ChartNoAxesCombined size={32}/><p>Результаты появятся после первой тренировки.</p></div> : Array.from(best.entries()).sort((a, b) => b[1] - a[1]).map(([ex, value]) => <div className="record osfit-record-row" key={ex}><span className="osfit-record-name">{ex}</span><strong className="osfit-record-value">{fmt(value)} кг</strong></div>)}
+        {!best.size ? <div className="empty compact-empty"><ChartNoAxesCombined size={32}/><p>Результаты появятся после первой тренировки.</p></div> : Array.from(best.entries()).sort((a, b) => b[1] - a[1]).map(([ex, value]) => <div className="record" key={ex}><span>{ex}</span><strong>{fmt(value)} кг</strong></div>)}
         <p className="small muted">1ПМ рассчитывается по формуле Эпли. Это оценка, не измеренный максимум.</p>
       </section>}
     </main>
