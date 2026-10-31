@@ -290,6 +290,7 @@ export default function App() {
   const [detail, setDetail] = useState<Workout | null>(null)
   const [importing, setImporting] = useState(false)
   const [textImport, setTextImport] = useState(false)
+  const [importMenuOpen, setImportMenuOpen] = useState(false)
   const [planText, setPlanText] = useState('')
   const [planName, setPlanName] = useState('Импорт из IRONLOG')
   const [profile,setProfile]=useState<Profile>(getProfile)
@@ -617,8 +618,8 @@ export default function App() {
 
   return <div className="app">
     <header className="header">
-      <button title="Настройки и архив" aria-label="Настройки и архив" className="icon-btn osfit-settings-button" onClick={() => { if (!abandon()) return; setTextImport(false); setSettings(true) }}><Settings size={22}/></button>
       <div className="brand"><span className="brand-icon"><Dumbbell size={22}/></span><div><strong>OSFIT</strong><small>ТРЕНИРОВКИ БЕЗ ЛИШНЕГО</small></div></div>
+      <button title="Настройки и архив" aria-label="Настройки и архив" className="icon-btn osfit-settings-button" onClick={() => { if (!abandon()) return; setTextImport(false); setSettings(true) }}><Settings size={22}/></button>
     </header>
     {error && <div className="error" role="alert">{error}<button onClick={() => setError('')}>×</button></div>}
     {notice && <div className="toast">{notice}</div>}
@@ -745,10 +746,13 @@ export default function App() {
         {backupAt&&<p className="osfit-helper">Последняя резервная копия: {new Date(backupAt).toLocaleDateString('ru-RU')}</p>}
         {workouts.length>0&&<details className="osfit-section"><summary>Рабочий объём по группам за {musclePeriod} календарных дней</summary>{groups.filter(g=>g!=='Все').map(g=><p key={g} className="osfit-goal">{g}: {weeklyMuscleSets(workouts,g,musclePeriod)} подходов</p>)}</details>}
         {showTemplates&&<div className="osfit-template-list">{PLAN_TEMPLATES.map((t,i)=><button key={t.title} onClick={()=>void createTemplate(i)}><strong>{t.title}</strong><small>{t.desc} · создаст {t.days.length} программы</small></button>)}</div>}
-        <button className="btn secondary full" onClick={()=>portableRef.current?.click()}><Upload size={17}/> Продолжить тренировку из файла</button>
+        <button className="btn secondary full osfit-import-main" aria-expanded={importMenuOpen} onClick={()=>setImportMenuOpen(v=>!v)}><Upload size={17}/> Импорт <span aria-hidden="true">{importMenuOpen?'⌃':'⌄'}</span></button>
         <input ref={portableRef} hidden type="file" accept=".txt,.json,.csv,.xlsx" onChange={e=>{const f=e.target.files?.[0];if(f)void importPortable(f);e.target.value=''}}/>
-        <label className="btn secondary full" style={{ marginBottom: 10 }}>Импорт общей программы <input hidden type="file" accept=".json" onChange={e=>{const f=e.target.files?.[0];if(f)void importSharedProgram(f);e.target.value=''}}/></label>
-        <button className="btn secondary full" style={{ marginBottom: 16 }} onClick={() => setTextImport(true)}><Upload size={17}/> Импорт IRONLOG</button>
+        {importMenuOpen&&<div className="card osfit-import-menu">
+          <button className="osfit-import-choice" onClick={()=>portableRef.current?.click()}><strong>Тренировка из файла</strong><small>TXT, JSON, CSV, XLSX</small></button>
+          <label className="osfit-import-choice"><strong>Готовая программа</strong><small>Общий файл JSON</small><input hidden type="file" accept=".json" onChange={e=>{const f=e.target.files?.[0];if(f)void importSharedProgram(f);e.target.value=''}}/></label>
+          <button className="osfit-import-choice" onClick={()=>{setImportMenuOpen(false);setTextImport(true)}}><strong>IRONLOG и текстовый план</strong><small>Импорт из Scriptable или текста</small></button>
+        </div>}
         {!programs.length ? <div className="empty"><Dumbbell size={38}/><h2>Начните с программы</h2><p>Добавьте упражнения и подходы — затем приступайте к тренировке.</p><button className="btn primary" onClick={() => beginProgram()}><Plus size={16}/> Создать программу</button></div> : programs.map(p => <article className="program-card" key={p.id}>
           <div className="program-top"><span className="program-mark"><Dumbbell size={19}/></span><div><strong>{p.name}</strong><p className="muted small">{p.exercises.length} упражнений · {p.exercises.reduce((n, x) => n + x.sets.length, 0)} подходов</p></div></div>
           <div className="program-actions"><button onClick={() => beginSession(p)} className="btn primary"><Play size={16} fill="currentColor"/> Начать</button><button title="Редактировать" className="btn secondary icon-only" onClick={() => beginProgram(p)}><PenLine size={17}/></button><button title="Поделиться программой" className="btn secondary icon-only" onClick={()=>exportProgram(p)}><Download size={17}/></button><button title="Копировать" className="btn secondary icon-only" onClick={() => { void saveProgram({ ...p, id: uid(), name: p.name + ' (копия)', createdAt: new Date().toISOString() }).then(load).catch(e => setError(String(e))) }}><Copy size={17}/></button><button title="Удалить" className="btn secondary icon-only" onClick={() => void removeP(p.id)}><Trash2 size={17}/></button></div>
@@ -794,7 +798,7 @@ export default function App() {
         <select className="input" value={selectedExercise} onChange={e=>setSelectedExercise(e.target.value)}><option value="">Выберите упражнение</option>{exerciseNames.map(n=><option key={n}>{n}</option>)}</select>
         {selectedExercise&&<div className="card"><div className="bars">{exerciseSeries.slice(-16).map((x,i)=>{const max=Math.max(1,...exerciseSeries.map(t=>t.value));return <div key={i} title={`${x.date}: ${x.value} кг`} style={{height:`${Math.max(5,x.value/max*100)}%`}}/>})}</div><p className="muted small">Максимальный выполненный вес, от старых тренировок к новым.</p></div>}
         <h2 className="section-title">Расчётные рекорды 1ПМ</h2>
-        {!best.size ? <div className="empty compact-empty"><ChartNoAxesCombined size={32}/><p>Результаты появятся после первой тренировки.</p></div> : Array.from(best.entries()).sort((a, b) => b[1] - a[1]).map(([ex, value]) => <div className="record" key={ex}><span>{ex}</span><strong>{fmt(value)} кг</strong></div>)}
+        {!best.size ? <div className="empty compact-empty"><ChartNoAxesCombined size={32}/><p>Результаты появятся после первой тренировки.</p></div> : Array.from(best.entries()).sort((a, b) => b[1] - a[1]).map(([ex, value]) => <div className="record osfit-record-row" key={ex}><span className="osfit-record-name">{ex}</span><strong className="osfit-record-value">{fmt(value)} кг</strong></div>)}
         <p className="small muted">1ПМ рассчитывается по формуле Эпли. Это оценка, не измеренный максимум.</p>
       </section>}
     </main>
