@@ -1,0 +1,19 @@
+:root {
+  --background: #f5f6f8;
+  --text: #17191d;
+  --surface-secondary: #ffffff;
+  --border: #dce0e5;
+  --accent: #0a84ff;
+  --separator: #e1e4e8;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --background: #101214;
+  --text: #eaeef2;
+  --surface-secondary: #1e242a;
+  --border: #37424d;
+  --accent: #0a84ff;
+  --separator: #35404a;
+  color-scheme: dark;
+}
