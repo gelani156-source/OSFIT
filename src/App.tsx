@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {ThemeToggle} from './ThemeToggle'
 import WorkoutMiniWidget from './WorkoutMiniWidget'
 import {muscleLoad,exerciseMuscleLoad} from './MuscleMap'
-import type {Muscle} from './MuscleMap'
+
 import {groups, groupFor, suggestions, serializeProgram, readProgramFile, getExerciseAlternative, weeklyMuscleSets, bodyPartPrompt} from './smart'
 
 import {convertIronlog} from './ironlog'
