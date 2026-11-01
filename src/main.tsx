@@ -4,4 +4,8 @@ import App from './App'
 import './style.css'
 import './theme.css'
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>)
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(console.warn)})}
+if(import.meta.env.PROD && 'serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`,{scope:import.meta.env.BASE_URL}).catch(console.warn)
+  })
+}

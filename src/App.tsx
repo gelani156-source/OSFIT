@@ -1,3 +1,4 @@
+import MuscleMap from './AnatomyMuscleMap'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {ThemeToggle} from './ThemeToggle'
 import WorkoutMiniWidget from './WorkoutMiniWidget'
@@ -81,35 +82,6 @@ const toLines=(items:[string,number,number][]):ExerciseLine[]=>items.map(([name,
 
 // Fixed SVG layer mapping: posterior calves are highlighted only on the back.
 // Female and male figures use different shoulder/waist/hip proportions, not merely scaling.
-function MuscleMap({loads,sex='male'}:{loads:Record<Muscle,number>,sex?:'male'|'female'}){
- const [side,setSide]=useState<'front'|'back'>('front');const [selected,setSelected]=useState<Muscle|null>(null)
- const female=sex==='female';const max=Math.max(1,...Object.values(loads));
- const basePath=female?'M87 74 Q77 79 70 91 Q64 105 73 128 L82 153 Q83 181 74 207 Q67 225 72 246 Q100 262 128 246 Q133 225 126 207 Q117 181 118 153 L127 128 Q136 105 130 91 Q123 79 113 74Z':'M83 74 Q65 77 59 94 L72 128 76 168 80 209 Q69 225 74 242 L126 242 Q131 225 120 209 L124 168 128 128 141 94 Q135 77 117 74Z';
- const parts:{id:Muscle,side:'front'|'back'|'both',d:string}[]=[
- {id:'shoulders',side:'both',d:'M70 87 Q53 91 50 117 L65 130 79 103Z M130 87 Q147 91 150 117 L135 130 121 103Z'},
- {id:'chest',side:'front',d:'M78 105 Q92 95 98 106 L98 137 73 130Z M122 105 Q108 95 102 106 L102 137 127 130Z'},
- {id:'forearms',side:'both',d:'M45 173 L57 177 46 207 35 207Z M155 173 L143 177 154 207 165 207Z'},
- {id:'biceps',side:'front',d:'M53 127 L66 133 59 166 48 164Z M147 127 L134 133 141 166 152 164Z'},
- {id:'triceps',side:'back',d:'M50 120 L65 130 59 171 46 165Z M150 120 L135 130 141 171 154 165Z'},
- {id:'abs',side:'front',d:'M84 147 L116 147 115 200 Q100 207 85 200Z'},
- {id:'traps',side:'back',d:'M83 79 L100 87 117 79 130 107 109 122 100 113 91 122 70 107Z'},
- {id:'back',side:'back',d:'M73 115 L97 130 97 191 81 204 72 163Z M127 115 L103 130 103 191 119 204 128 163Z'},
- {id:'glutes',side:'back',d:'M76 213 Q87 207 99 219 L97 246 Q82 251 74 232Z M124 213 Q113 207 101 219 L103 246 Q118 251 126 232Z'},
- {id:'quads',side:'front',d:'M76 245 L97 250 96 312 83 323 77 281Z M124 245 L103 250 104 312 117 323 123 281Z'},
- {id:'hamstrings',side:'back',d:'M76 247 L97 252 94 317 81 324 77 284Z M124 247 L103 252 106 317 119 324 123 284Z'},
- {id:'calves',side:'back',d:'M81 337 Q93 329 97 344 L92 385 Q87 395 81 380Z M119 337 Q107 329 103 344 L108 385 Q113 395 119 380Z'}
- ];
- const names:Record<Muscle,string>={chest:'Грудь',shoulders:'Дельты',biceps:'Бицепс',forearms:'Предплечья',triceps:'Трицепс',abs:'Пресс',back:'Спина',traps:'Трапеции',glutes:'Ягодицы',quads:'Квадрицепсы',hamstrings:'Задняя поверхность бедра',calves:'Икры'};
- const all=Object.keys(names) as Muscle[];
- return <div className="muscle-layout"><div className="osfit-view-buttons"><button className={side==='front'?'active':''} onClick={()=>setSide('front')}>Спереди</button><button className={side==='back'?'active':''} onClick={()=>setSide('back')}>Сзади</button></div>
- <svg className="osfit-sex-svg" viewBox="0 0 200 440" role="img" aria-label={female?'Женская анатомическая модель':'Мужская анатомическая модель'}>
- <defs><linearGradient id="osfitFigure" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#344850"/><stop offset="1" stopColor="#17252c"/></linearGradient></defs>
- <g fill="url(#osfitFigure)" stroke="#536871" strokeWidth="1.5" strokeLinejoin="round"><path d="M82 49 Q74 35 78 21 Q83 7 100 7 Q117 7 122 21 Q126 35 118 49 Q113 61 106 66 L106 76 94 76 94 66 Q87 61 82 49Z"/><path d={basePath}/><path d={female?'M70 92 Q55 87 50 108 L39 163 30 205 32 223 43 213 54 181 68 130Z':'M59 92 Q48 88 45 108 L38 163 29 204 31 223 43 213 54 181 71 131Z'}/><path d={female?'M130 92 Q145 87 150 108 L161 163 170 205 168 223 157 213 146 181 132 130Z':'M141 92 Q152 88 155 108 L162 163 171 204 169 223 157 213 146 181 129 131Z'}/><path d={female?'M73 240 Q68 263 75 312 L80 339 77 393 81 431 93 431 100 346 98 261Z':'M75 239 Q71 261 78 312 L82 339 78 393 81 431 94 431 100 346 98 260Z'}/><path d={female?'M127 240 Q132 263 125 312 L120 339 123 393 119 431 107 431 100 346 102 261Z':'M125 239 Q129 261 122 312 L118 339 122 393 119 431 106 431 100 346 102 260Z'}/></g>
- <g transform={female?'translate(3 0) scale(.97 1)':undefined}>{parts.filter(z=>z.side===side||z.side==='both').map(z=>{const v=loads[z.id]||0;return <path key={z.id} role="button" tabIndex={0} aria-label={`${names[z.id]}, нагрузка ${v}`} onClick={()=>setSelected(z.id)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')setSelected(z.id)}} d={z.d} fill={selected===z.id?'rgba(10,132,255,.92)':v>0?`rgba(10,132,255,${.28+.62*v/max})`:'#344b51'} stroke={selected===z.id?'#ffffff':'#648186'} strokeWidth={selected===z.id?2.5:1} style={{cursor:'pointer'}}><title>{names[z.id]}</title></path>})}</g></svg>
- <p className="muted small" style={{textAlign:'center'}}>{selected?`${names[selected]}: ${(loads[selected]||0).toFixed(1)} условных подходов`:female?'Женская модель: более узкие плечи и выраженная линия таза':'Мужская модель: более широкие плечи и торс'}</p>
- <div className="muscle-legend">{all.map(k=><button key={k} className={selected===k?'active':''} aria-pressed={selected===k} onClick={()=>{setSelected(k);setSide(['back','traps','glutes','hamstrings','calves'].includes(k)?'back':'front')}}><span>{names[k]}</span><b>{(loads[k]||0).toFixed(1)}</b></button>)}</div>
- <p className="muted small">Схематическая карта тренировочной нагрузки. Передняя поверхность голени не обозначается как икроножная мышца.</p></div>
-}
 
 // Compact local ZIP/XLSX reader. Only simple .xlsx worksheets; formulas are read via cached values.
 async function xlsxAsRows(file:File):Promise<string[][]>{
